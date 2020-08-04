@@ -1,0 +1,41 @@
+on:
+  push:
+    paths:
+      - 'clang/**'
+      - 'compiler-rt/**'
+      - 'llvm/**'
+      - 'openmp/**'
+
+name: Build and upload llorgefi2linux compiler changeset build
+
+jobs:
+  build_llorgefi2linux:
+    name: Build llorgefi2linux compiler
+    runs-on: ubuntu-latest
+    container: centos:7
+    steps:
+      - name: Prepare CentOS tools
+        run: |
+          yum install -y wget
+          wget https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
+          yum install -y --nogpgcheck ./epel-release-latest-*.noarch.rpm
+          yum install -y --nogpgcheck cmake3 make git perl-Data-Dumper centos-release-scl-rh
+          yum install -y --nogpgcheck devtoolset-7-gcc devtoolset-7-binutils devtoolset-7-binutils-devel devtoolset-7-gcc-c++
+          ln -s /usr/bin/cmake3 /usr/bin/cmake
+      - name: Checkout code
+        uses: actions/checkout@v1
+      - name: Build llorgefi2linux compiler on CentOS
+        run: |
+          mkdir build install
+          git show --name-only --oneline HEAD^2 >install/llvm_changes 2>&1 || true
+          cd build
+          scl enable devtoolset-7 "cmake -G 'Unix Makefiles' -DLLVM_ENABLE_PROJECTS='clang;compiler-rt;openmp' -DCMAKE_INSTALL_PREFIX=../install -DLLVM_LINK_LLVM_DYLIB=ON -DCMAKE_BUILD_TYPE=Release -DLLVM_TARGETS_TO_BUILD='X86' -DLLVM_BINUTILS_INCDIR=/opt/rh/devtoolset-7/root/usr/include ../llvm"
+          scl enable devtoolset-7 "make install -j$(nproc)"
+          cd ../install
+          tar cfz ../llorgefi2linux.tar.xz *
+          cd ..
+      - name: Upload llorgefi2linux build artifacts
+        uses: actions/upload-artifact@v1
+        with:
+          name: llorgefi2linux
+          path: llorgefi2linux.tar.xz
