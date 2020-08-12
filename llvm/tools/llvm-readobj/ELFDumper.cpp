@@ -1841,6 +1841,7 @@ static const EnumEntry<unsigned> ElfHeaderAMDGPUFlags[] = {
   LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_MACH_AMDGCN_GFX1011),
   LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_MACH_AMDGCN_GFX1012),
   LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_MACH_AMDGCN_GFX1030),
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_MACH_AMDGCN_GFX1031),
   LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_XNACK),
   LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_SRAM_ECC)
 };
@@ -3327,23 +3328,32 @@ static void printMipsReginfoData(ScopedPrinter &W,
 }
 
 template <class ELFT> void ELFDumper<ELFT>::printMipsReginfo() {
-  const ELFFile<ELFT> *Obj = ObjF->getELFFile();
-  const Elf_Shdr *RegInfo = findSectionByName(".reginfo");
-  if (!RegInfo) {
+  const Elf_Shdr *RegInfoSec = findSectionByName(".reginfo");
+  if (!RegInfoSec) {
     W.startLine() << "There is no .reginfo section in the file.\n";
     return;
   }
 
-  ArrayRef<uint8_t> Sec = unwrapOrError(ObjF->getFileName(),
-                                        Obj->getSectionContents(RegInfo));
-  if (Sec.size() != sizeof(Elf_Mips_RegInfo<ELFT>)) {
-    W.startLine() << "The .reginfo section has a wrong size.\n";
+  const ELFFile<ELFT> *Obj = ObjF->getELFFile();
+  Expected<ArrayRef<uint8_t>> ContentsOrErr =
+      Obj->getSectionContents(RegInfoSec);
+  if (!ContentsOrErr) {
+    this->reportUniqueWarning(createError(
+        "unable to read the content of the .reginfo section (" +
+        describe(*RegInfoSec) + "): " + toString(ContentsOrErr.takeError())));
+    return;
+  }
+
+  if (ContentsOrErr->size() < sizeof(Elf_Mips_RegInfo<ELFT>)) {
+    this->reportUniqueWarning(
+        createError("the .reginfo section has an invalid size (0x" +
+                    Twine::utohexstr(ContentsOrErr->size()) + ")"));
     return;
   }
 
   DictScope GS(W, "MIPS RegInfo");
-  auto *Reginfo = reinterpret_cast<const Elf_Mips_RegInfo<ELFT> *>(Sec.data());
-  printMipsReginfoData(W, *Reginfo);
+  printMipsReginfoData(W, *reinterpret_cast<const Elf_Mips_RegInfo<ELFT> *>(
+                              ContentsOrErr->data()));
 }
 
 template <class ELFT>
@@ -3423,24 +3433,30 @@ template <class ELFT> void ELFDumper<ELFT>::printMipsOptions() {
 
 template <class ELFT> void ELFDumper<ELFT>::printStackMap() const {
   const ELFFile<ELFT> *Obj = ObjF->getELFFile();
-  const Elf_Shdr *StackMapSection = nullptr;
-  for (const Elf_Shdr &Sec : cantFail(Obj->sections())) {
-    StringRef Name =
-        unwrapOrError(ObjF->getFileName(), Obj->getSectionName(&Sec));
-    if (Name == ".llvm_stackmaps") {
-      StackMapSection = &Sec;
-      break;
-    }
-  }
-
+  const Elf_Shdr *StackMapSection = findSectionByName(".llvm_stackmaps");
   if (!StackMapSection)
     return;
 
-  ArrayRef<uint8_t> StackMapContentsArray = unwrapOrError(
-      ObjF->getFileName(), Obj->getSectionContents(StackMapSection));
+  auto Warn = [&](Error &&E) {
+    this->reportUniqueWarning(createError("unable to read the stack map from " +
+                                          describe(*StackMapSection) + ": " +
+                                          toString(std::move(E))));
+  };
 
-  prettyPrintStackMap(
-      W, StackMapParser<ELFT::TargetEndianness>(StackMapContentsArray));
+  Expected<ArrayRef<uint8_t>> ContentOrErr =
+      Obj->getSectionContents(StackMapSection);
+  if (!ContentOrErr) {
+    Warn(ContentOrErr.takeError());
+    return;
+  }
+
+  if (Error E = StackMapParser<ELFT::TargetEndianness>::validateHeader(
+          *ContentOrErr)) {
+    Warn(std::move(E));
+    return;
+  }
+
+  prettyPrintStackMap(W, StackMapParser<ELFT::TargetEndianness>(*ContentOrErr));
 }
 
 template <class ELFT> void ELFDumper<ELFT>::printGroupSections() {
@@ -3773,7 +3789,7 @@ template <class ELFT> void GNUStyle<ELFT>::printRelocations(const ELFO *Obj) {
     } else if (!opts::RawRelr && (Sec.sh_type == ELF::SHT_RELR ||
                                   Sec.sh_type == ELF::SHT_ANDROID_RELR)) {
       Elf_Relr_Range Relrs = unwrapOrError(this->FileName, Obj->relrs(&Sec));
-      Entries = unwrapOrError(this->FileName, Obj->decode_relrs(Relrs)).size();
+      Entries = Obj->decode_relrs(Relrs).size();
     } else {
       Entries = Sec.getEntityCount();
     }
@@ -4501,9 +4517,7 @@ void GNUStyle<ELFT>::printDynamicRelocations(const ELFO *Obj) {
        << " contains " << DynRelrRegion.Size << " bytes:\n";
     printRelocHeader(ELF::SHT_REL);
     Elf_Relr_Range Relrs = this->dumper()->dyn_relrs();
-    std::vector<Elf_Rel> RelrRels =
-        unwrapOrError(this->FileName, Obj->decode_relrs(Relrs));
-    for (const Elf_Rel &R : RelrRels)
+    for (const Elf_Rel &R : Obj->decode_relrs(Relrs))
       printDynamicRelocation(Obj, R);
   }
   if (DynPLTRelRegion.Size) {
@@ -5510,34 +5524,54 @@ void DumpStyle<ELFT>::printRelocationsHelper(const ELFFile<ELFT> *Obj,
   unsigned SecNdx = &Sec - &cantFail(Obj->sections()).front();
   unsigned RelNdx = 0;
 
+  auto Warn = [&](Error &&E) {
+    this->reportUniqueWarning(createError("unable to read relocations from " +
+                                          describe(Obj, Sec) + ": " +
+                                          toString(std::move(E))));
+  };
+
   switch (Sec.sh_type) {
   case ELF::SHT_REL:
-    for (const Elf_Rel &R : unwrapOrError(this->FileName, Obj->rels(&Sec)))
-      printRelReloc(Obj, SecNdx, SymTab, R, ++RelNdx);
+    if (Expected<Elf_Rel_Range> RangeOrErr = Obj->rels(&Sec)) {
+      for (const Elf_Rel &R : *RangeOrErr)
+        printRelReloc(Obj, SecNdx, SymTab, R, ++RelNdx);
+    } else {
+      Warn(RangeOrErr.takeError());
+    }
     break;
   case ELF::SHT_RELA:
-    for (const Elf_Rela &R : unwrapOrError(this->FileName, Obj->relas(&Sec)))
-      printRelaReloc(Obj, SecNdx, SymTab, R, ++RelNdx);
+    if (Expected<Elf_Rela_Range> RangeOrErr = Obj->relas(&Sec)) {
+      for (const Elf_Rela &R : *RangeOrErr)
+        printRelaReloc(Obj, SecNdx, SymTab, R, ++RelNdx);
+    } else {
+      Warn(RangeOrErr.takeError());
+    }
     break;
   case ELF::SHT_RELR:
   case ELF::SHT_ANDROID_RELR: {
-    Elf_Relr_Range Relrs = unwrapOrError(this->FileName, Obj->relrs(&Sec));
+    Expected<Elf_Relr_Range> RangeOrErr = Obj->relrs(&Sec);
+    if (!RangeOrErr) {
+      Warn(RangeOrErr.takeError());
+      break;
+    }
     if (opts::RawRelr) {
-      for (const Elf_Relr &R : Relrs)
+      for (const Elf_Relr &R : *RangeOrErr)
         printRelrReloc(R);
       break;
     }
-    std::vector<Elf_Rel> RelrRels =
-        unwrapOrError(this->FileName, Obj->decode_relrs(Relrs));
-    for (const Elf_Rel &R : RelrRels)
+
+    for (const Elf_Rel &R : Obj->decode_relrs(*RangeOrErr))
       printRelReloc(Obj, SecNdx, SymTab, R, ++RelNdx);
     break;
   }
   case ELF::SHT_ANDROID_REL:
   case ELF::SHT_ANDROID_RELA:
-    for (const Elf_Rela &R :
-         unwrapOrError(this->FileName, Obj->android_relas(&Sec)))
-      printRelaReloc(Obj, SecNdx, SymTab, R, ++RelNdx);
+    if (Expected<std::vector<Elf_Rela>> RelasOrErr = Obj->android_relas(&Sec)) {
+      for (const Elf_Rela &R : *RelasOrErr)
+        printRelaReloc(Obj, SecNdx, SymTab, R, ++RelNdx);
+    } else {
+      Warn(RelasOrErr.takeError());
+    }
     break;
   }
 }
@@ -6420,9 +6454,7 @@ void LLVMStyle<ELFT>::printDynamicRelocations(const ELFO *Obj) {
 
   if (DynRelrRegion.Size > 0) {
     Elf_Relr_Range Relrs = this->dumper()->dyn_relrs();
-    std::vector<Elf_Rel> RelrRels =
-        unwrapOrError(this->FileName, Obj->decode_relrs(Relrs));
-    for (const Elf_Rel &R : RelrRels)
+    for (const Elf_Rel &R : Obj->decode_relrs(Relrs))
       printDynamicRelocation(Obj, R);
   }
   if (DynPLTRelRegion.EntSize == sizeof(Elf_Rela))

@@ -320,6 +320,7 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::FNEARBYINT, MVT::f32, Custom);
   setOperationAction(ISD::FNEARBYINT, MVT::f64, Custom);
 
+  setOperationAction(ISD::FREM, MVT::f16, Custom);
   setOperationAction(ISD::FREM, MVT::f32, Custom);
   setOperationAction(ISD::FREM, MVT::f64, Custom);
 
@@ -1543,7 +1544,7 @@ SDValue AMDGPUTargetLowering::SplitVectorLoad(const SDValue Op,
   SDValue LoLoad = DAG.getExtLoad(Load->getExtensionType(), SL, LoVT,
                                   Load->getChain(), BasePtr, SrcValue, LoMemVT,
                                   BaseAlign, Load->getMemOperand()->getFlags());
-  SDValue HiPtr = DAG.getObjectPtrOffset(SL, BasePtr, Size);
+  SDValue HiPtr = DAG.getObjectPtrOffset(SL, BasePtr, TypeSize::Fixed(Size));
   SDValue HiLoad =
       DAG.getExtLoad(Load->getExtensionType(), SL, HiVT, Load->getChain(),
                      HiPtr, SrcValue.getWithOffset(LoMemVT.getStoreSize()),
@@ -2083,16 +2084,15 @@ SDValue AMDGPUTargetLowering::LowerSDIVREM(SDValue Op,
 SDValue AMDGPUTargetLowering::LowerFREM(SDValue Op, SelectionDAG &DAG) const {
   SDLoc SL(Op);
   EVT VT = Op.getValueType();
+  auto Flags = Op->getFlags();
   SDValue X = Op.getOperand(0);
   SDValue Y = Op.getOperand(1);
 
-  // TODO: Should this propagate fast-math-flags?
-
-  SDValue Div = DAG.getNode(ISD::FDIV, SL, VT, X, Y);
-  SDValue Trunc = DAG.getNode(ISD::FTRUNC, SL, VT, Div);
-  SDValue Neg = DAG.getNode(ISD::FNEG, SL, VT, Trunc);
+  SDValue Div = DAG.getNode(ISD::FDIV, SL, VT, X, Y, Flags);
+  SDValue Trunc = DAG.getNode(ISD::FTRUNC, SL, VT, Div, Flags);
+  SDValue Neg = DAG.getNode(ISD::FNEG, SL, VT, Trunc, Flags);
   // TODO: For f32 use FMAD instead if !hasFastFMA32?
-  return DAG.getNode(ISD::FMA, SL, VT, Neg, Y, X);
+  return DAG.getNode(ISD::FMA, SL, VT, Neg, Y, X, Flags);
 }
 
 SDValue AMDGPUTargetLowering::LowerFCEIL(SDValue Op, SelectionDAG &DAG) const {
@@ -4371,8 +4371,6 @@ const char* AMDGPUTargetLowering::getTargetNodeName(unsigned Opcode) const {
   NODE_NAME_CASE(BUFFER_ATOMIC_CMPSWAP)
   NODE_NAME_CASE(BUFFER_ATOMIC_CSUB)
   NODE_NAME_CASE(BUFFER_ATOMIC_FADD)
-  NODE_NAME_CASE(BUFFER_ATOMIC_PK_FADD)
-  NODE_NAME_CASE(ATOMIC_PK_FADD)
 
   case AMDGPUISD::LAST_AMDGPU_ISD_NUMBER: break;
   }
