@@ -299,13 +299,16 @@ void MachOPlatform::InitScraperPlugin::modifyPassConfig(
     MaterializationResponsibility &MR, const Triple &TT,
     jitlink::PassConfiguration &Config) {
 
+  if (!MR.getInitializerSymbol())
+    return;
+
   Config.PrePrunePasses.push_back([this, &MR](jitlink::LinkGraph &G) -> Error {
     JITLinkSymbolVector InitSectionSymbols;
     preserveInitSectionIfPresent(InitSectionSymbols, G, "__mod_init_func");
     preserveInitSectionIfPresent(InitSectionSymbols, G, "__objc_selrefs");
     preserveInitSectionIfPresent(InitSectionSymbols, G, "__objc_classlist");
 
-    if (!InitSymbolDeps.empty()) {
+    if (!InitSectionSymbols.empty()) {
       std::lock_guard<std::mutex> Lock(InitScraperMutex);
       InitSymbolDeps[&MR] = std::move(InitSectionSymbols);
     }
