@@ -548,9 +548,6 @@ namespace n {
   struct S { };
 }
 void test() {
-  // FIXME: Remove the `UnknownExpression` wrapping `s1` and `s2`. This
-  // `UnknownExpression` comes from a leaf `CXXConstructExpr` in the
-  // ClangAST. We need to ignore leaf implicit nodes.
   [[::n::S s1]];
   [[n::S s2]];
 }
@@ -564,8 +561,7 @@ SimpleDeclaration
 | `-'::' ListDelimiter
 |-'S'
 `-SimpleDeclarator Declarator
-  `-UnknownExpression
-    `-'s1'
+  `-'s1'
 )txt",
        R"txt(
 SimpleDeclaration
@@ -575,8 +571,7 @@ SimpleDeclaration
 | `-'::' ListDelimiter
 |-'S'
 `-SimpleDeclarator Declarator
-  `-UnknownExpression
-    `-'s2'
+  `-'s2'
 )txt"}));
 }
 
@@ -608,8 +603,7 @@ SimpleDeclaration
 | `-'::' ListDelimiter
 |-'S'
 `-SimpleDeclarator Declarator
-  `-UnknownExpression
-    `-'s1'
+  `-'s1'
 )txt",
        R"txt(
 SimpleDeclaration
@@ -623,8 +617,7 @@ SimpleDeclaration
 | `-'::' ListDelimiter
 |-'S'
 `-SimpleDeclarator Declarator
-  `-UnknownExpression
-    `-'s2'
+  `-'s2'
 )txt"}));
 }
 
@@ -1745,19 +1738,15 @@ TEST_P(SyntaxTreeTest, OverloadedOperator_Plus) {
 struct X {
   friend X operator+(X, const X&);
 };
-// FIXME: Remove additional `UnknownExpression` wrapping `x`. For that, ignore
-// implicit copy constructor called on `x`. This should've been ignored already,
-// as we `IgnoreImplicit` when traversing an `Stmt`.
 void test(X x, X y) {
   [[x + y]];
 }
 )cpp",
       {R"txt(
 BinaryOperatorExpression Expression
-|-UnknownExpression LeftHandSide
-| `-IdExpression
-|   `-UnqualifiedId UnqualifiedId
-|     `-'x'
+|-IdExpression LeftHandSide
+| `-UnqualifiedId UnqualifiedId
+|   `-'x'
 |-'+' OperatorToken
 `-IdExpression RightHandSide
   `-UnqualifiedId UnqualifiedId
@@ -3821,26 +3810,137 @@ TranslationUnit Detached
 )txt"));
 }
 
+TEST_P(SyntaxTreeTest, InitDeclarator_Equal) {
+  if (!GetParam().isCXX()) {
+    return;
+  }
+  EXPECT_TRUE(treeDumpEqualOnAnnotations(
+      R"cpp(
+struct S { S(int);};
+void test() {
+  [[S s = 1]];
+}
+)cpp",
+      {R"txt(
+SimpleDeclaration
+|-'S'
+`-SimpleDeclarator Declarator
+  |-'s'
+  |-'='
+  `-IntegerLiteralExpression
+    `-'1' LiteralToken
+)txt"}));
+}
+
 TEST_P(SyntaxTreeTest, InitDeclarator_Brace) {
   if (!GetParam().isCXX11OrLater()) {
     return;
   }
-  EXPECT_TRUE(treeDumpEqual(
+  EXPECT_TRUE(treeDumpEqualOnAnnotations(
       R"cpp(
-int a {};
+struct S { 
+  S();
+  S(int);
+  S(int, float);
+};
+void test(){
+  // FIXME: 's...' is a declarator and '{...}' is initializer
+  [[S s0{}]];
+  [[S s1{1}]];
+  [[S s2{1, 2.}]];
+}
 )cpp",
-      R"txt(
-TranslationUnit Detached
-`-SimpleDeclaration
-  |-'int'
-  |-SimpleDeclarator Declarator
-  | |-'a'
-  | `-UnknownExpression
-  |   `-UnknownExpression
-  |     |-'{'
-  |     `-'}'
-  `-';'
-)txt"));
+      {R"txt(
+SimpleDeclaration
+|-'S'
+`-SimpleDeclarator Declarator
+  `-UnknownExpression
+    |-'s0'
+    |-'{'
+    `-'}'
+  )txt",
+       R"txt(
+SimpleDeclaration
+|-'S'
+`-SimpleDeclarator Declarator
+  `-UnknownExpression
+    |-'s1'
+    |-'{'
+    |-IntegerLiteralExpression
+    | `-'1' LiteralToken
+    `-'}'
+  )txt",
+       R"txt(
+SimpleDeclaration
+|-'S'
+`-SimpleDeclarator Declarator
+  `-UnknownExpression
+    |-'s2'
+    |-'{'
+    |-IntegerLiteralExpression
+    | `-'1' LiteralToken
+    |-','
+    |-FloatingLiteralExpression
+    | `-'2.' LiteralToken
+    `-'}'
+)txt"}));
+}
+
+TEST_P(SyntaxTreeTest, InitDeclarator_EqualBrace) {
+  if (!GetParam().isCXX11OrLater()) {
+    return;
+  }
+  EXPECT_TRUE(treeDumpEqualOnAnnotations(
+      R"cpp(
+struct S { 
+  S();
+  S(int);
+  S(int, float);
+};
+void test() {
+  // FIXME: '= {...}' is initializer
+  [[S s0 = {}]];
+  [[S s1 = {1}]];
+  [[S s2 = {1, 2.}]];
+}
+)cpp",
+      {R"txt(
+SimpleDeclaration
+|-'S'
+`-SimpleDeclarator Declarator
+  |-'s0'
+  |-'='
+  `-UnknownExpression
+    |-'{'
+    `-'}'
+  )txt",
+       R"txt(
+SimpleDeclaration
+|-'S'
+`-SimpleDeclarator Declarator
+  |-'s1'
+  |-'='
+  `-UnknownExpression
+    |-'{'
+    |-IntegerLiteralExpression
+    | `-'1' LiteralToken
+    `-'}'
+  )txt",
+       R"txt(
+SimpleDeclaration
+|-'S'
+`-SimpleDeclarator Declarator
+  |-'s2'
+  |-'='
+  `-UnknownExpression
+    |-'{'
+    |-IntegerLiteralExpression
+    | `-'1' LiteralToken
+    |-','
+    |-FloatingLiteralExpression
+    | `-'2.' LiteralToken
+    `-'}'
+)txt"}));
 }
 
 TEST_P(SyntaxTreeTest, InitDeclarator_Paren) {
@@ -3851,19 +3951,188 @@ TEST_P(SyntaxTreeTest, InitDeclarator_Paren) {
       R"cpp(
 struct S {
   S(int);
+  S(int, float);
 };
-[[S s(1);]]
+// FIXME: 's...' is a declarator and '(...)' is initializer
+[[S s1(1);]]
+[[S s2(1, 2.);]]
 )cpp",
       {R"txt(
 SimpleDeclaration
 |-'S'
 |-SimpleDeclarator Declarator
 | `-UnknownExpression
-|   |-'s'
+|   |-'s1'
 |   |-'('
 |   |-IntegerLiteralExpression
 |   | `-'1' LiteralToken
 |   `-')'
+`-';'
+  )txt",
+       R"txt(
+SimpleDeclaration
+|-'S'
+|-SimpleDeclarator Declarator
+| `-UnknownExpression
+|   |-'s2'
+|   |-'('
+|   |-IntegerLiteralExpression
+|   | `-'1' LiteralToken
+|   |-','
+|   |-FloatingLiteralExpression
+|   | `-'2.' LiteralToken
+|   `-')'
+`-';'
+)txt"}));
+}
+
+TEST_P(SyntaxTreeTest, ImplicitConversion_Argument) {
+  if (!GetParam().isCXX()) {
+    return;
+  }
+  EXPECT_TRUE(treeDumpEqualOnAnnotations(
+      R"cpp(
+struct X {
+  X(int);
+};
+void TakeX(const X&);
+void test() {
+  [[TakeX(1)]];
+}
+)cpp",
+      {R"txt(
+CallExpression Expression
+|-IdExpression Callee
+| `-UnqualifiedId UnqualifiedId
+|   `-'TakeX'
+|-'(' OpenParen
+|-CallArguments Arguments
+| `-IntegerLiteralExpression ListElement
+|   `-'1' LiteralToken
+`-')' CloseParen
+)txt"}));
+}
+
+TEST_P(SyntaxTreeTest, ImplicitConversion_Return) {
+  if (!GetParam().isCXX()) {
+    return;
+  }
+  EXPECT_TRUE(treeDumpEqualOnAnnotations(
+      R"cpp(
+struct X {
+  X(int);
+};
+X CreateX(){
+  [[return 1;]]
+}
+)cpp",
+      {R"txt(
+ReturnStatement Statement
+|-'return' IntroducerKeyword
+|-IntegerLiteralExpression ReturnValue
+| `-'1' LiteralToken
+`-';'
+)txt"}));
+}
+
+TEST_P(SyntaxTreeTest, ConstructorCall_ZeroArguments) {
+  if (!GetParam().isCXX()) {
+    return;
+  }
+  EXPECT_TRUE(treeDumpEqualOnAnnotations(
+      R"cpp(
+struct X {
+  X();
+};
+X test() {
+  [[return X();]]
+}
+)cpp",
+      {R"txt(
+ReturnStatement Statement
+|-'return' IntroducerKeyword
+|-UnknownExpression ReturnValue
+| |-'X'
+| |-'('
+| `-')'
+`-';'
+)txt"}));
+}
+
+TEST_P(SyntaxTreeTest, ConstructorCall_OneArgument) {
+  if (!GetParam().isCXX()) {
+    return;
+  }
+  EXPECT_TRUE(treeDumpEqualOnAnnotations(
+      R"cpp(
+struct X {
+  X(int);
+};
+X test() {
+  [[return X(1);]]
+}
+)cpp",
+      {R"txt(
+ReturnStatement Statement
+|-'return' IntroducerKeyword
+|-UnknownExpression ReturnValue
+| |-'X'
+| |-'('
+| |-IntegerLiteralExpression
+| | `-'1' LiteralToken
+| `-')'
+`-';'
+)txt"}));
+}
+
+TEST_P(SyntaxTreeTest, ConstructorCall_MultipleArguments) {
+  if (!GetParam().isCXX()) {
+    return;
+  }
+  EXPECT_TRUE(treeDumpEqualOnAnnotations(
+      R"cpp(
+struct X {
+  X(int, char);
+};
+X test() {
+  [[return X(1, '2');]]
+}
+)cpp",
+      {R"txt(
+ReturnStatement Statement
+|-'return' IntroducerKeyword
+|-UnknownExpression ReturnValue
+| |-'X'
+| |-'('
+| |-IntegerLiteralExpression
+| | `-'1' LiteralToken
+| |-','
+| |-CharacterLiteralExpression
+| | `-''2'' LiteralToken
+| `-')'
+`-';'
+)txt"}));
+}
+
+TEST_P(SyntaxTreeTest, TypeConversion_FunctionalNotation) {
+  if (!GetParam().isCXX()) {
+    return;
+  }
+  EXPECT_TRUE(treeDumpEqualOnAnnotations(
+      R"cpp(
+float test() {
+  [[return float(1);]]
+}
+)cpp",
+      {R"txt(
+ReturnStatement Statement
+|-'return' IntroducerKeyword
+|-UnknownExpression ReturnValue
+| |-'float'
+| |-'('
+| |-IntegerLiteralExpression
+| | `-'1' LiteralToken
+| `-')'
 `-';'
 )txt"}));
 }
