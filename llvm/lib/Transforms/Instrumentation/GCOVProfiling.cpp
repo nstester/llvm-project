@@ -112,11 +112,11 @@ public:
 
 private:
   // Create the .gcno files for the Module based on DebugInfo.
-  void emitProfileNotes();
+  void emitProfileNotes(NamedMDNode *CUNode);
 
   // Modify the program to track transitions along edges and call into the
   // profiling runtime to emit .gcda files when run.
-  bool emitProfileArcs();
+  bool emitProfileArcs(NamedMDNode *CUNode);
 
   bool isFunctionInstrumented(const Function &F);
   std::vector<Regex> createRegexesFromString(StringRef RegexesStr);
@@ -322,14 +322,14 @@ namespace {
   // object users can construct, the blocks and lines will be rooted here.
   class GCOVFunction : public GCOVRecord {
   public:
-    GCOVFunction(GCOVProfiler *P, Function *F, const DISubprogram *SP,
+    GCOVFunction(GCOVProfiler *P, Function &F, const DISubprogram *SP,
                  unsigned EndLine, uint32_t Ident, int Version)
-        : GCOVRecord(P), SP(SP), EndLine(EndLine), Ident(Ident),
+        : GCOVRecord(P), F(F), SP(SP), EndLine(EndLine), Ident(Ident),
           Version(Version), EntryBlock(P, 0), ReturnBlock(P, 1) {
       LLVM_DEBUG(dbgs() << "Function: " << getFunctionName(SP) << "\n");
       bool ExitBlockBeforeBody = Version >= 48;
       uint32_t i = ExitBlockBeforeBody ? 2 : 1;
-      for (BasicBlock &BB : *F)
+      for (BasicBlock &BB : F)
         Blocks.insert(std::make_pair(&BB, GCOVBlock(P, i++)));
       if (!ExitBlockBeforeBody)
         ReturnBlock.Number = i;
@@ -423,6 +423,8 @@ namespace {
       for (BasicBlock &I : *F)
         getBlock(&I).writeOut();
     }
+
+    Function &F;
 
   private:
     const DISubprogram *SP;
@@ -550,14 +552,19 @@ bool GCOVProfiler::runOnModule(
   this->GetTLI = std::move(GetTLI);
   Ctx = &M.getContext();
 
+  NamedMDNode *CUNode = M.getNamedMetadata("llvm.dbg.cu");
+  if (!CUNode)
+    return false;
+
   bool Modified = AddFlushBeforeForkAndExec();
 
   FilterRe = createRegexesFromString(Options.Filter);
   ExcludeRe = createRegexesFromString(Options.Exclude);
 
-  if (Options.EmitNotes) emitProfileNotes();
+  if (Options.EmitNotes)
+    emitProfileNotes(CUNode);
   if (Options.EmitData)
-    Modified |= emitProfileArcs();
+    Modified |= emitProfileArcs(CUNode);
   return Modified;
 }
 
@@ -683,10 +690,7 @@ bool GCOVProfiler::AddFlushBeforeForkAndExec() {
   return !Forks.empty() || !Execs.empty();
 }
 
-void GCOVProfiler::emitProfileNotes() {
-  NamedMDNode *CU_Nodes = M->getNamedMetadata("llvm.dbg.cu");
-  if (!CU_Nodes) return;
-
+void GCOVProfiler::emitProfileNotes(NamedMDNode *CUNode) {
   int Version;
   {
     uint8_t c3 = Options.Version[0];
@@ -696,12 +700,12 @@ void GCOVProfiler::emitProfileNotes() {
                         : (c3 - '0') * 10 + c1 - '0';
   }
 
-  for (unsigned i = 0, e = CU_Nodes->getNumOperands(); i != e; ++i) {
+  for (unsigned i = 0, e = CUNode->getNumOperands(); i != e; ++i) {
     // Each compile unit gets its own .gcno file. This means that whether we run
     // this pass over the original .o's as they're produced, or run it after
     // LTO, we'll generate the same .gcno files.
 
-    auto *CU = cast<DICompileUnit>(CU_Nodes->getOperand(i));
+    auto *CU = cast<DICompileUnit>(CUNode->getOperand(i));
 
     // Skip module skeleton (and module) CUs.
     if (CU->getDWOId())
@@ -734,7 +738,7 @@ void GCOVProfiler::emitProfileNotes() {
       // single successor, so split the entry block to make sure of that.
       BasicBlock &EntryBlock = F.getEntryBlock();
 
-      Funcs.push_back(std::make_unique<GCOVFunction>(this, &F, SP, EndLine,
+      Funcs.push_back(std::make_unique<GCOVFunction>(this, F, SP, EndLine,
                                                      FunctionIdent++, Version));
       GCOVFunction &Func = *Funcs.back();
 
@@ -818,22 +822,12 @@ void GCOVProfiler::emitProfileNotes() {
   }
 }
 
-bool GCOVProfiler::emitProfileArcs() {
-  NamedMDNode *CU_Nodes = M->getNamedMetadata("llvm.dbg.cu");
-  if (!CU_Nodes) return false;
-
+bool GCOVProfiler::emitProfileArcs(NamedMDNode *CUNode) {
   bool Result = false;
-  for (unsigned i = 0, e = CU_Nodes->getNumOperands(); i != e; ++i) {
+  for (unsigned i = 0, e = CUNode->getNumOperands(); i != e; ++i) {
     SmallVector<std::pair<GlobalVariable *, MDNode *>, 8> CountersBySP;
-    for (auto &F : M->functions()) {
-      DISubprogram *SP = F.getSubprogram();
-      unsigned EndLine;
-      if (!SP) continue;
-      if (!functionHasLines(F, EndLine) || !isFunctionInstrumented(F))
-        continue;
-      // TODO: Functions using scope-based EH are currently not supported.
-      if (isUsingScopeBasedEH(F)) continue;
-
+    for (const GCOVFunction &GF : make_pointee_range(Funcs)) {
+      Function &F = GF.F;
       DenseMap<std::pair<BasicBlock *, BasicBlock *>, unsigned> EdgeToCounter;
       unsigned Edges = 0;
       EdgeToCounter[{nullptr, &F.getEntryBlock()}] = Edges++;
@@ -855,7 +849,7 @@ bool GCOVProfiler::emitProfileArcs() {
                            GlobalValue::InternalLinkage,
                            Constant::getNullValue(CounterTy),
                            "__llvm_gcov_ctr");
-      CountersBySP.push_back(std::make_pair(Counters, SP));
+      CountersBySP.emplace_back(Counters, F.getSubprogram());
 
       // If a BB has several predecessors, use a PHINode to select
       // the correct counter.
