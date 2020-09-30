@@ -37,6 +37,18 @@ define i16 @test7(i32 %A) {
   ret i16 %D
 }
 
+define <2 x i16> @test7_vector(<2 x i32> %A) {
+; CHECK-LABEL: @test7_vector(
+; CHECK-NEXT:    [[TMP1:%.*]] = lshr <2 x i32> [[A:%.*]], <i32 16, i32 16>
+; CHECK-NEXT:    [[D:%.*]] = trunc <2 x i32> [[TMP1]] to <2 x i16>
+; CHECK-NEXT:    ret <2 x i16> [[D]]
+;
+  %B = tail call <2 x i32> @llvm.bswap.v2i32(<2 x i32> %A) nounwind
+  %C = trunc <2 x i32> %B to <2 x i16>
+  %D = tail call <2 x i16> @llvm.bswap.v2i16(<2 x i16> %C) nounwind
+  ret <2 x i16> %D
+}
+
 define i16 @test8(i64 %A) {
 ; CHECK-LABEL: @test8(
 ; CHECK-NEXT:    [[TMP1:%.*]] = lshr i64 [[A:%.*]], 48
@@ -47,6 +59,18 @@ define i16 @test8(i64 %A) {
   %C = trunc i64 %B to i16
   %D = tail call i16 @llvm.bswap.i16(i16 %C) nounwind
   ret i16 %D
+}
+
+define <2 x i16> @test8_vector(<2 x i64> %A) {
+; CHECK-LABEL: @test8_vector(
+; CHECK-NEXT:    [[TMP1:%.*]] = lshr <2 x i64> [[A:%.*]], <i64 48, i64 48>
+; CHECK-NEXT:    [[D:%.*]] = trunc <2 x i64> [[TMP1]] to <2 x i16>
+; CHECK-NEXT:    ret <2 x i16> [[D]]
+;
+  %B = tail call <2 x i64> @llvm.bswap.v2i64(<2 x i64> %A) nounwind
+  %C = trunc <2 x i64> %B to <2 x i16>
+  %D = tail call <2 x i16> @llvm.bswap.v2i16(<2 x i16> %C) nounwind
+  ret <2 x i16> %D
 }
 
 ; Misc: Fold bswap(undef) to undef.
@@ -334,4 +358,6 @@ define i64 @bs_and64i_multiuse(i64 %a, i64 %b) #0 {
 declare i16 @llvm.bswap.i16(i16)
 declare i32 @llvm.bswap.i32(i32)
 declare i64 @llvm.bswap.i64(i64)
+declare <2 x i16> @llvm.bswap.v2i16(<2 x i16>)
 declare <2 x i32> @llvm.bswap.v2i32(<2 x i32>)
+declare <2 x i64> @llvm.bswap.v2i64(<2 x i64>)
