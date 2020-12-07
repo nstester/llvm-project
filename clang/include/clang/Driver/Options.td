@@ -2560,6 +2560,10 @@ def mexec_model_EQ : Joined<["-"], "mexec-model=">, Group<m_wasm_Features_Driver
                      Values<"command,reactor">,
                      HelpText<"Execution model (WebAssembly only)">;
 
+def mcode_object_version_EQ : Joined<["-"], "mcode-object-version=">, Group<m_Group>,
+  HelpText<"Specify code object ABI version. Defaults to 4. (AMDGPU only)">,
+  MetaVarName<"<version>">, Values<"2,3,4">;
+
 def mcode_object_v3_legacy : Flag<["-"], "mcode-object-v3">, Group<m_Group>,
   HelpText<"Legacy option to specify code object ABI V2 (-mnocode-object-v3) or V3 (-mcode-object-v3) (AMDGPU only)">;
 def mno_code_object_v3_legacy : Flag<["-"], "mno-code-object-v3">, Group<m_Group>;
@@ -2568,18 +2572,10 @@ def mcumode : Flag<["-"], "mcumode">, Group<m_amdgpu_Features_Group>,
   HelpText<"Specify CU (-mcumode) or WGP (-mno-cumode) wavefront execution mode (AMDGPU only)">;
 def mno_cumode : Flag<["-"], "mno-cumode">, Group<m_amdgpu_Features_Group>;
 
-def msramecc : Flag<["-"], "msramecc">, Group<m_amdgpu_Features_Group>,
-  HelpText<"Specify SRAM ECC mode (AMDGPU only)">;
-def mno_sramecc : Flag<["-"], "mno-sramecc">, Group<m_amdgpu_Features_Group>;
-
 def mwavefrontsize64 : Flag<["-"], "mwavefrontsize64">, Group<m_Group>,
   HelpText<"Specify wavefront size 64 mode (AMDGPU only)">;
 def mno_wavefrontsize64 : Flag<["-"], "mno-wavefrontsize64">, Group<m_Group>,
   HelpText<"Specify wavefront size 32 mode (AMDGPU only)">;
-
-def mxnack : Flag<["-"], "mxnack">, Group<m_amdgpu_Features_Group>,
-  HelpText<"Specify XNACK mode (AMDGPU only)">;
-def mno_xnack : Flag<["-"], "mno-xnack">, Group<m_amdgpu_Features_Group>;
 
 def munsafe_fp_atomics : Flag<["-"], "munsafe-fp-atomics">, Group<m_Group>,
   HelpText<"Enable unsafe floating point atomic instructions (AMDGPU only)">,
