@@ -745,7 +745,8 @@ class LldbGdbServerTestCase(gdbremote_testcase.GdbRemoteTestCaseBase, DwarfOpcod
         self.Hc_then_Csignal_signals_correct_thread(self.TARGET_EXC_BAD_ACCESS)
 
     @skipIfWindows # no SIGSEGV support
-    @expectedFailureAll(oslist=["freebsd", "netbsd"])
+    @expectedFailureAll(oslist=["freebsd"], bugnumber="llvm.org/pr48419")
+    @expectedFailureNetBSD
     @llgs_test
     def test_Hc_then_Csignal_signals_correct_thread_launch_llgs(self):
         self.init_llgs_test()
@@ -842,7 +843,6 @@ class LldbGdbServerTestCase(gdbremote_testcase.GdbRemoteTestCaseBase, DwarfOpcod
         self.qMemoryRegionInfo_is_supported()
 
     @llgs_test
-    @expectedFailureAll(oslist=["freebsd"])
     def test_qMemoryRegionInfo_is_supported_llgs(self):
         self.init_llgs_test()
         self.build()
@@ -907,7 +907,6 @@ class LldbGdbServerTestCase(gdbremote_testcase.GdbRemoteTestCaseBase, DwarfOpcod
         self.qMemoryRegionInfo_reports_code_address_as_executable()
 
     @skipIfWindows # No pty support to test any inferior output
-    @expectedFailureAll(oslist=["freebsd"])
     @llgs_test
     def test_qMemoryRegionInfo_reports_code_address_as_executable_llgs(self):
         self.init_llgs_test()
@@ -974,7 +973,6 @@ class LldbGdbServerTestCase(gdbremote_testcase.GdbRemoteTestCaseBase, DwarfOpcod
         self.qMemoryRegionInfo_reports_stack_address_as_readable_writeable()
 
     @skipIfWindows # No pty support to test any inferior output
-    @expectedFailureAll(oslist=["freebsd"])
     @llgs_test
     def test_qMemoryRegionInfo_reports_stack_address_as_readable_writeable_llgs(
             self):
@@ -1041,7 +1039,6 @@ class LldbGdbServerTestCase(gdbremote_testcase.GdbRemoteTestCaseBase, DwarfOpcod
         self.qMemoryRegionInfo_reports_heap_address_as_readable_writeable()
 
     @skipIfWindows # No pty support to test any inferior output
-    @expectedFailureAll(oslist=["freebsd"])
     @llgs_test
     def test_qMemoryRegionInfo_reports_heap_address_as_readable_writeable_llgs(
             self):
