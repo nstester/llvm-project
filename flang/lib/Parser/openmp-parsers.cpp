@@ -157,8 +157,8 @@ TYPE_PARSER(
     "ACQ_REL" >> construct<OmpClause>(construct<OmpClause::AcqRel>()) ||
     "ALIGNED" >>
         construct<OmpClause>(parenthesized(Parser<OmpAlignedClause>{})) ||
-    "ALLOCATE" >>
-        construct<OmpClause>(parenthesized(Parser<OmpAllocateClause>{})) ||
+    "ALLOCATE" >> construct<OmpClause>(construct<OmpClause::Allocate>(
+                      parenthesized(Parser<OmpAllocateClause>{}))) ||
     "ALLOCATOR" >> construct<OmpClause>(construct<OmpClause::Allocator>(
                        parenthesized(scalarIntExpr))) ||
     "COLLAPSE" >> construct<OmpClause>(construct<OmpClause::Collapse>(
@@ -167,8 +167,8 @@ TYPE_PARSER(
                     parenthesized(Parser<OmpObjectList>{}))) ||
     "COPYPRIVATE" >> construct<OmpClause>(construct<OmpClause::Copyprivate>(
                          (parenthesized(Parser<OmpObjectList>{})))) ||
-    "DEFAULT"_id >>
-        construct<OmpClause>(parenthesized(Parser<OmpDefaultClause>{})) ||
+    "DEFAULT"_id >> construct<OmpClause>(construct<OmpClause::Default>(
+                        parenthesized(Parser<OmpDefaultClause>{}))) ||
     "DEFAULTMAP" >>
         construct<OmpClause>(parenthesized(Parser<OmpDefaultmapClause>{})) ||
     "DEPEND" >>

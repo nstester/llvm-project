@@ -127,6 +127,7 @@ public:
   void Leave(const parser::OmpClauseList &);
   void Enter(const parser::OmpClause &);
   void Enter(const parser::OmpNowait &);
+  void Enter(const parser::OmpClause::Allocate &);
   void Enter(const parser::OmpClause::Allocator &);
   void Enter(const parser::OmpClause::Inbranch &);
   void Enter(const parser::OmpClause::Mergeable &);
@@ -136,6 +137,7 @@ public:
   void Enter(const parser::OmpClause::Collapse &);
   void Enter(const parser::OmpClause::Copyin &);
   void Enter(const parser::OmpClause::Copyprivate &);
+  void Enter(const parser::OmpClause::Default &);
   void Enter(const parser::OmpClause::Device &);
   void Enter(const parser::OmpClause::Final &);
   void Enter(const parser::OmpClause::Firstprivate &);
@@ -174,8 +176,6 @@ public:
   void Enter(const parser::OmpAtomicCapture &);
   void Leave(const parser::OmpAtomic &);
   void Enter(const parser::OmpAlignedClause &);
-  void Enter(const parser::OmpAllocateClause &);
-  void Enter(const parser::OmpDefaultClause &);
   void Enter(const parser::OmpDefaultmapClause &);
   void Enter(const parser::OmpDependClause &);
   void Enter(const parser::OmpDistScheduleClause &);

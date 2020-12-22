@@ -62,7 +62,7 @@ def OMPC_Collapse : Clause<"collapse"> {
 }
 def OMPC_Default : Clause<"default"> {
   let clangClass = "OMPDefaultClause";
-  let flangClass = "OmpDefaultClause";
+  let flangClassValue = "OmpDefaultClause";
 }
 def OMPC_Private : Clause<"private"> {
   let clangClass = "OMPPrivateClause";
@@ -254,7 +254,7 @@ def OMPC_AtomicDefaultMemOrder : Clause<"atomic_default_mem_order"> {
 }
 def OMPC_Allocate : Clause<"allocate"> {
   let clangClass = "OMPAllocateClause";
-  let flangClass = "OmpAllocateClause";
+  let flangClassValue = "OmpAllocateClause";
 }
 def OMPC_NonTemporal : Clause<"nontemporal"> {
   let clangClass = "OMPNontemporalClause";
