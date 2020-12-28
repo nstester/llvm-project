@@ -1117,7 +1117,7 @@ bool LoopVectorizationLegality::canVectorizeLoopCFG(Loop *Lp,
   // In general, there's nothing which prevents an LCSSA phi in exit block from
   // having two or more values if there are multiple exiting edges leading to
   // the exit block.  (TODO: implement general case)
-  if (!empty(ExitBB->phis()) && !ExitBB->getSinglePredecessor()) {
+  if (!llvm::empty(ExitBB->phis()) && !ExitBB->getSinglePredecessor()) {
     reportVectorizationFailure("The loop must have no live-out values if "
                                "it has more than one exiting block",
         "loop control flow is not understood by vectorizer",
