@@ -13,6 +13,7 @@
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/ScopeExit.h"
@@ -934,13 +935,25 @@ bool SimplifyCFGOpt::SimplifyEqualityComparisonWithOnlyPredecessor(
     LLVM_DEBUG(dbgs() << "Threading pred instr: " << *Pred->getTerminator()
                       << "Through successor TI: " << *TI);
 
+    SmallMapVector<BasicBlock *, int, 8> NumPerSuccessorCases;
     for (SwitchInst::CaseIt i = SI->case_end(), e = SI->case_begin(); i != e;) {
       --i;
+      auto *Successor = i->getCaseSuccessor();
+      ++NumPerSuccessorCases[Successor];
       if (DeadCases.count(i->getCaseValue())) {
-        i->getCaseSuccessor()->removePredecessor(TI->getParent());
+        Successor->removePredecessor(PredDef);
         SI.removeCase(i);
+        --NumPerSuccessorCases[Successor];
       }
     }
+
+    std::vector<DominatorTree::UpdateType> Updates;
+    for (const std::pair<BasicBlock *, int> &I : NumPerSuccessorCases)
+      if (I.second == 0)
+        Updates.push_back({DominatorTree::Delete, PredDef, I.first});
+    if (DTU)
+      DTU->applyUpdatesPermissive(Updates);
+
     LLVM_DEBUG(dbgs() << "Leaving: " << *TI << "\n");
     return true;
   }
@@ -1088,10 +1101,15 @@ bool SimplifyCFGOpt::FoldValueComparisonIntoPredecessors(Instruction *TI,
       SmallSetVector<BasicBlock*, 4> FailBlocks;
       if (!SafeToMergeTerminators(TI, PTI, &FailBlocks)) {
         for (auto *Succ : FailBlocks) {
-          if (!SplitBlockPredecessors(Succ, TI->getParent(), ".fold.split"))
+          if (!SplitBlockPredecessors(Succ, TI->getParent(), ".fold.split",
+                                      DTU ? &DTU->getDomTree() : nullptr))
             return false;
         }
       }
+
+      std::vector<DominatorTree::UpdateType> Updates;
+
+      Updates.push_back({DominatorTree::Delete, Pred, BB});
 
       // Figure out which 'cases' to copy from SI to PSI.
       std::vector<ValueEqualityComparisonCase> BBCases;
@@ -1156,6 +1174,7 @@ bool SimplifyCFGOpt::FoldValueComparisonIntoPredecessors(Instruction *TI,
         // Reconstruct the new switch statement we will be building.
         if (PredDefault != BBDefault) {
           PredDefault->removePredecessor(Pred);
+          Updates.push_back({DominatorTree::Delete, Pred, PredDefault});
           PredDefault = BBDefault;
           NewSuccessors.push_back(BBDefault);
         }
@@ -1232,8 +1251,10 @@ bool SimplifyCFGOpt::FoldValueComparisonIntoPredecessors(Instruction *TI,
       // Okay, at this point, we know which new successor Pred will get.  Make
       // sure we update the number of entries in the PHI nodes for these
       // successors.
-      for (BasicBlock *NewSuccessor : NewSuccessors)
+      for (BasicBlock *NewSuccessor : NewSuccessors) {
         AddPredecessorToBlock(NewSuccessor, Pred, BB);
+        Updates.push_back({DominatorTree::Insert, Pred, NewSuccessor});
+      }
 
       Builder.SetInsertPoint(PTI);
       // Convert pointer to int before we switch.
@@ -1272,9 +1293,19 @@ bool SimplifyCFGOpt::FoldValueComparisonIntoPredecessors(Instruction *TI,
             InfLoopBlock = BasicBlock::Create(BB->getContext(), "infloop",
                                               BB->getParent());
             BranchInst::Create(InfLoopBlock, InfLoopBlock);
+            Updates.push_back(
+                {DominatorTree::Insert, InfLoopBlock, InfLoopBlock});
           }
           NewSI->setSuccessor(i, InfLoopBlock);
         }
+
+      if (InfLoopBlock) {
+        Updates.push_back({DominatorTree::Delete, Pred, BB});
+        Updates.push_back({DominatorTree::Insert, Pred, InfLoopBlock});
+      }
+
+      if (DTU)
+        DTU->applyUpdatesPermissive(Updates);
 
       Changed = true;
     }
@@ -3105,6 +3136,8 @@ bool llvm::FoldBranchToCommonDest(BranchInst *BI, DomTreeUpdater *DTU,
         assert(PBI_C->getType()->isIntegerTy(1));
         Instruction *MergedCond = nullptr;
         if (PBI->getSuccessor(0) == UniqueSucc) {
+          Updates.push_back(
+              {DominatorTree::Delete, PredBlock, PBI->getSuccessor(1)});
           // Create (PBI_Cond and PBI_C) or (!PBI_Cond and BI_Value)
           // PBI_C is true: PBI_Cond or (!PBI_Cond and BI_Value)
           //       is false: !PBI_Cond and BI_Value
@@ -3117,6 +3150,9 @@ bool llvm::FoldBranchToCommonDest(BranchInst *BI, DomTreeUpdater *DTU,
             MergedCond = cast<Instruction>(Builder.CreateBinOp(
                 Instruction::Or, PBI->getCondition(), MergedCond, "or.cond"));
         } else {
+          assert(PBI->getSuccessor(1) == UniqueSucc && "Unexpected branch");
+          Updates.push_back(
+              {DominatorTree::Delete, PredBlock, PBI->getSuccessor(0)});
           // Create (PBI_Cond and BI_Value) or (!PBI_Cond and PBI_C)
           // PBI_C is true: (PBI_Cond and BI_Value) or (!PBI_Cond)
           //       is false: PBI_Cond and BI_Value
@@ -4016,6 +4052,8 @@ bool SimplifyCFGOpt::tryToSimplifyUncondBranchWithICmpInIt(
   ICI->replaceAllUsesWith(DefaultCst);
   ICI->eraseFromParent();
 
+  SmallVector<DominatorTree::UpdateType, 2> Updates;
+
   // Okay, the switch goes to this block on a default value.  Add an edge from
   // the switch to the merge point on the compared value.
   BasicBlock *NewBB =
@@ -4029,13 +4067,17 @@ bool SimplifyCFGOpt::tryToSimplifyUncondBranchWithICmpInIt(
       SIW.setSuccessorWeight(0, *NewW);
     }
     SIW.addCase(Cst, NewBB, NewW);
+    Updates.push_back({DominatorTree::Insert, Pred, NewBB});
   }
 
   // NewBB branches to the phi block, add the uncond branch and the phi entry.
   Builder.SetInsertPoint(NewBB);
   Builder.SetCurrentDebugLocation(SI->getDebugLoc());
   Builder.CreateBr(SuccBlock);
+  Updates.push_back({DominatorTree::Insert, NewBB, SuccBlock});
   PHIUse->addIncoming(NewCst, NewBB);
+  if (DTU)
+    DTU->applyUpdatesPermissive(Updates);
   return true;
 }
 
@@ -4741,15 +4783,29 @@ static bool CasesAreContiguous(SmallVectorImpl<ConstantInt *> &Cases) {
   return true;
 }
 
-static void createUnreachableSwitchDefault(SwitchInst *Switch) {
+static void createUnreachableSwitchDefault(SwitchInst *Switch,
+                                           DomTreeUpdater *DTU) {
   LLVM_DEBUG(dbgs() << "SimplifyCFG: switch default is dead.\n");
+  auto *BB = Switch->getParent();
   BasicBlock *NewDefaultBlock =
-     SplitBlockPredecessors(Switch->getDefaultDest(), Switch->getParent(), "");
+      SplitBlockPredecessors(Switch->getDefaultDest(), Switch->getParent(), "",
+                             DTU ? &DTU->getDomTree() : nullptr);
+  auto *OrigDefaultBlock = Switch->getDefaultDest();
   Switch->setDefaultDest(&*NewDefaultBlock);
-  SplitBlock(&*NewDefaultBlock, &NewDefaultBlock->front());
+  if (DTU)
+    DTU->applyUpdatesPermissive(
+        {{DominatorTree::Delete, BB, OrigDefaultBlock},
+         {DominatorTree::Insert, BB, &*NewDefaultBlock}});
+  SplitBlock(&*NewDefaultBlock, &NewDefaultBlock->front(),
+             DTU ? &DTU->getDomTree() : nullptr);
+  SmallVector<DominatorTree::UpdateType, 2> Updates;
+  for (auto *Successor : successors(NewDefaultBlock))
+    Updates.push_back({DominatorTree::Delete, NewDefaultBlock, Successor});
   auto *NewTerminator = NewDefaultBlock->getTerminator();
   new UnreachableInst(Switch->getContext(), NewTerminator);
   EraseTerminatorAndDCECond(NewTerminator);
+  if (DTU)
+    DTU->applyUpdatesPermissive(Updates);
 }
 
 /// Turn a switch with two reachable destinations into an integer range
@@ -4760,6 +4816,8 @@ bool SimplifyCFGOpt::TurnSwitchRangeIntoICmp(SwitchInst *SI,
 
   bool HasDefault =
       !isa<UnreachableInst>(SI->getDefaultDest()->getFirstNonPHIOrDbg());
+
+  auto *BB = SI->getParent();
 
   // Partition the cases into two sets with different destinations.
   BasicBlock *DestA = HasDefault ? SI->getDefaultDest() : nullptr;
@@ -4864,17 +4922,24 @@ bool SimplifyCFGOpt::TurnSwitchRangeIntoICmp(SwitchInst *SI,
   // Clean up the default block - it may have phis or other instructions before
   // the unreachable terminator.
   if (!HasDefault)
-    createUnreachableSwitchDefault(SI);
+    createUnreachableSwitchDefault(SI, DTU);
+
+  auto *UnreachableDefault = SI->getDefaultDest();
 
   // Drop the switch.
   SI->eraseFromParent();
+
+  if (!HasDefault && DTU)
+    DTU->applyUpdatesPermissive(
+        {{DominatorTree::Delete, BB, UnreachableDefault}});
 
   return true;
 }
 
 /// Compute masked bits for the condition of a switch
 /// and use it to remove dead cases.
-static bool eliminateDeadSwitchCases(SwitchInst *SI, AssumptionCache *AC,
+static bool eliminateDeadSwitchCases(SwitchInst *SI, DomTreeUpdater *DTU,
+                                     AssumptionCache *AC,
                                      const DataLayout &DL) {
   Value *Cond = SI->getCondition();
   unsigned Bits = Cond->getType()->getIntegerBitWidth();
@@ -4888,11 +4953,15 @@ static bool eliminateDeadSwitchCases(SwitchInst *SI, AssumptionCache *AC,
 
   // Gather dead cases.
   SmallVector<ConstantInt *, 8> DeadCases;
+  SmallMapVector<BasicBlock *, int, 8> NumPerSuccessorCases;
   for (auto &Case : SI->cases()) {
+    auto *Successor = Case.getCaseSuccessor();
+    ++NumPerSuccessorCases[Successor];
     const APInt &CaseVal = Case.getCaseValue()->getValue();
     if (Known.Zero.intersects(CaseVal) || !Known.One.isSubsetOf(CaseVal) ||
         (CaseVal.getMinSignedBits() > MaxSignificantBitsInCond)) {
       DeadCases.push_back(Case.getCaseValue());
+      --NumPerSuccessorCases[Successor];
       LLVM_DEBUG(dbgs() << "SimplifyCFG: switch case " << CaseVal
                         << " is dead.\n");
     }
@@ -4910,7 +4979,7 @@ static bool eliminateDeadSwitchCases(SwitchInst *SI, AssumptionCache *AC,
   if (HasDefault && DeadCases.empty() &&
       NumUnknownBits < 64 /* avoid overflow */ &&
       SI->getNumCases() == (1ULL << NumUnknownBits)) {
-    createUnreachableSwitchDefault(SI);
+    createUnreachableSwitchDefault(SI, /*DTU=*/nullptr);
     return true;
   }
 
@@ -4926,6 +4995,13 @@ static bool eliminateDeadSwitchCases(SwitchInst *SI, AssumptionCache *AC,
     CaseI->getCaseSuccessor()->removePredecessor(SI->getParent());
     SIW.removeCase(CaseI);
   }
+
+  std::vector<DominatorTree::UpdateType> Updates;
+  for (const std::pair<BasicBlock *, int> &I : NumPerSuccessorCases)
+    if (I.second == 0)
+      Updates.push_back({DominatorTree::Delete, SI->getParent(), I.first});
+  if (DTU)
+    DTU->applyUpdatesPermissive(Updates);
 
   return true;
 }
@@ -6098,7 +6174,7 @@ bool SimplifyCFGOpt::simplifySwitch(SwitchInst *SI, IRBuilder<> &Builder) {
     return requestResimplify();
 
   // Remove unreachable cases.
-  if (eliminateDeadSwitchCases(SI, Options.AC, DL))
+  if (eliminateDeadSwitchCases(SI, DTU, Options.AC, DL))
     return requestResimplify();
 
   if (switchToSelect(SI, Builder, DTU, DL, TTI))
@@ -6127,10 +6203,13 @@ bool SimplifyCFGOpt::simplifyIndirectBr(IndirectBrInst *IBI) {
   bool Changed = false;
 
   // Eliminate redundant destinations.
+  std::vector<DominatorTree::UpdateType> Updates;
   SmallPtrSet<Value *, 8> Succs;
   for (unsigned i = 0, e = IBI->getNumDestinations(); i != e; ++i) {
     BasicBlock *Dest = IBI->getDestination(i);
     if (!Dest->hasAddressTaken() || !Succs.insert(Dest).second) {
+      if (!Dest->hasAddressTaken())
+        Updates.push_back({DominatorTree::Delete, BB, Dest});
       Dest->removePredecessor(BB);
       IBI->removeDestination(i);
       --i;
@@ -6138,6 +6217,10 @@ bool SimplifyCFGOpt::simplifyIndirectBr(IndirectBrInst *IBI) {
       Changed = true;
     }
   }
+
+  if (DTU)
+    DTU->applyUpdatesPermissive(Updates);
+  Updates.clear();
 
   if (IBI->getNumDestinations() == 0) {
     // If the indirectbr has no successors, change it to unreachable.
