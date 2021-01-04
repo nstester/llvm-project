@@ -253,12 +253,26 @@ FunctionPass *createAMDGPUISelDag(
   TargetMachine *TM = nullptr,
   CodeGenOpt::Level OptLevel = CodeGenOpt::Default);
 ModulePass *createAMDGPUAlwaysInlinePass(bool GlobalOpt = true);
+
+struct AMDGPUAlwaysInlinePass : PassInfoMixin<AMDGPUAlwaysInlinePass> {
+  AMDGPUAlwaysInlinePass(bool GlobalOpt = true) : GlobalOpt(GlobalOpt) {}
+  PreservedAnalyses run(Module &M, ModuleAnalysisManager &AM);
+
+private:
+  bool GlobalOpt;
+};
+
 ModulePass *createR600OpenCLImageTypeLoweringPass();
 FunctionPass *createAMDGPUAnnotateUniformValues();
 
 ModulePass *createAMDGPUPrintfRuntimeBinding();
 void initializeAMDGPUPrintfRuntimeBindingPass(PassRegistry&);
 extern char &AMDGPUPrintfRuntimeBindingID;
+
+struct AMDGPUPrintfRuntimeBindingPass
+    : PassInfoMixin<AMDGPUPrintfRuntimeBindingPass> {
+  PreservedAnalyses run(Module &M, ModuleAnalysisManager &AM);
+};
 
 ModulePass* createAMDGPUUnifyMetadataPass();
 void initializeAMDGPUUnifyMetadataPass(PassRegistry&);

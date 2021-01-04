@@ -489,6 +489,10 @@ void AMDGPUTargetMachine::adjustPassManager(PassManagerBuilder &Builder) {
   });
 }
 
+void AMDGPUTargetMachine::registerAliasAnalyses(AAManager &AAM) {
+  AAM.registerFunctionAnalysis<AMDGPUAA>();
+}
+
 void AMDGPUTargetMachine::registerPassBuilderCallbacks(PassBuilder &PB,
                                                        bool DebugPassManager) {
   PB.registerPipelineParsingCallback(
@@ -500,6 +504,14 @@ void AMDGPUTargetMachine::registerPassBuilderCallbacks(PassBuilder &PB,
         }
         if (PassName == "amdgpu-unify-metadata") {
           PM.addPass(AMDGPUUnifyMetadataPass());
+          return true;
+        }
+        if (PassName == "amdgpu-printf-runtime-binding") {
+          PM.addPass(AMDGPUPrintfRuntimeBindingPass());
+          return true;
+        }
+        if (PassName == "amdgpu-always-inline") {
+          PM.addPass(AMDGPUAlwaysInlinePass());
           return true;
         }
         return false;
@@ -535,6 +547,18 @@ void AMDGPUTargetMachine::registerPassBuilderCallbacks(PassBuilder &PB,
         return false;
       });
 
+  PB.registerAnalysisRegistrationCallback([](FunctionAnalysisManager &FAM) {
+    FAM.registerPass([&] { return AMDGPUAA(); });
+  });
+
+  PB.registerParseAACallback([](StringRef AAName, AAManager &AAM) {
+    if (AAName == "amdgpu-aa") {
+      AAM.registerFunctionAnalysis<AMDGPUAA>();
+      return true;
+    }
+    return false;
+  });
+
   PB.registerPipelineStartEPCallback([this, DebugPassManager](
                                          ModulePassManager &PM,
                                          PassBuilder::OptimizationLevel Level) {
@@ -552,6 +576,7 @@ void AMDGPUTargetMachine::registerPassBuilderCallbacks(PassBuilder &PB,
           return;
 
         PM.addPass(AMDGPUUnifyMetadataPass());
+        PM.addPass(AMDGPUPrintfRuntimeBindingPass());
 
         if (InternalizeSymbols) {
           PM.addPass(InternalizePass(mustPreserveGV));
@@ -560,6 +585,8 @@ void AMDGPUTargetMachine::registerPassBuilderCallbacks(PassBuilder &PB,
         if (InternalizeSymbols) {
           PM.addPass(GlobalDCEPass());
         }
+        if (EarlyInlineAll && !EnableFunctionCalls)
+          PM.addPass(AMDGPUAlwaysInlinePass());
       });
 
   PB.registerCGSCCOptimizerLateEPCallback(
