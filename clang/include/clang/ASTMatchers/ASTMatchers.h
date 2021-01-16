@@ -847,6 +847,12 @@ traverse(TraversalKind TK, const internal::PolymorphicMatcherWithParam2<
       TK, InnerMatcher);
 }
 
+template <typename... T>
+internal::Matcher<typename internal::GetClade<T...>::Type>
+traverse(TraversalKind TK, const internal::MapAnyOfHelper<T...> &InnerMatcher) {
+  return traverse(TK, InnerMatcher.with());
+}
+
 /// Matches expressions that match InnerMatcher after any implicit AST
 /// nodes are stripped off.
 ///
@@ -2692,6 +2698,36 @@ extern const internal::VariadicOperatorMatcherFunc<1, 1> optionally;
 extern const internal::VariadicDynCastAllOfMatcher<Stmt,
                                                    UnaryExprOrTypeTraitExpr>
     unaryExprOrTypeTraitExpr;
+
+/// Matches any of the \p NodeMatchers with InnerMatchers nested within
+///
+/// Given
+/// \code
+///   if (true);
+///   for (; true; );
+/// \endcode
+/// with the matcher
+/// \code
+///   mapAnyOf(ifStmt, forStmt).with(
+///     hasCondition(cxxBoolLiteralExpr(equals(true)))
+///     ).bind("trueCond")
+/// \endcode
+/// matches the \c if and the \c for. It is equivalent to:
+/// \code
+///   auto trueCond = hasCondition(cxxBoolLiteralExpr(equals(true)));
+///   anyOf(
+///     ifStmt(trueCond).bind("trueCond"),
+///     forStmt(trueCond).bind("trueCond")
+///     );
+/// \endcode
+///
+/// The with() chain-call accepts zero or more matchers which are combined
+/// as-if with allOf() in each of the node matchers.
+/// Usable as: Any Matcher
+template <typename T, typename... U>
+auto mapAnyOf(internal::VariadicDynCastAllOfMatcher<T, U> const &...) {
+  return internal::MapAnyOfHelper<U...>();
+}
 
 /// Matches unary expressions that have a specific type of argument.
 ///
@@ -5161,9 +5197,12 @@ AST_POLYMORPHIC_MATCHER_P_OVERLOAD(equals,
 /// \endcode
 AST_POLYMORPHIC_MATCHER_P(hasOperatorName,
                           AST_POLYMORPHIC_SUPPORTED_TYPES(BinaryOperator,
+                                                          CXXOperatorCallExpr,
                                                           UnaryOperator),
                           std::string, Name) {
-  return Name == Node.getOpcodeStr(Node.getOpcode());
+  if (Optional<StringRef> OpName = internal::getOpName(Node))
+    return *OpName == Name;
+  return false;
 }
 
 /// Matches operator expressions (binary or unary) that have any of the
@@ -5175,7 +5214,8 @@ AST_POLYMORPHIC_MATCHER_P(hasOperatorName,
 extern const internal::VariadicFunction<
     internal::PolymorphicMatcherWithParam1<
         internal::HasAnyOperatorNameMatcher, std::vector<std::string>,
-        AST_POLYMORPHIC_SUPPORTED_TYPES(BinaryOperator, UnaryOperator)>,
+        AST_POLYMORPHIC_SUPPORTED_TYPES(BinaryOperator, CXXOperatorCallExpr,
+                                        UnaryOperator)>,
     StringRef, internal::hasAnyOperatorNameFunc>
     hasAnyOperatorName;
 
@@ -5227,9 +5267,10 @@ AST_POLYMORPHIC_MATCHER(isComparisonOperator,
 /// \endcode
 AST_POLYMORPHIC_MATCHER_P(hasLHS,
                           AST_POLYMORPHIC_SUPPORTED_TYPES(BinaryOperator,
+                                                          CXXOperatorCallExpr,
                                                           ArraySubscriptExpr),
                           internal::Matcher<Expr>, InnerMatcher) {
-  const Expr *LeftHandSide = Node.getLHS();
+  const Expr *LeftHandSide = internal::getLHS(Node);
   return (LeftHandSide != nullptr &&
           InnerMatcher.matches(*LeftHandSide, Finder, Builder));
 }
@@ -5242,18 +5283,23 @@ AST_POLYMORPHIC_MATCHER_P(hasLHS,
 /// \endcode
 AST_POLYMORPHIC_MATCHER_P(hasRHS,
                           AST_POLYMORPHIC_SUPPORTED_TYPES(BinaryOperator,
+                                                          CXXOperatorCallExpr,
                                                           ArraySubscriptExpr),
                           internal::Matcher<Expr>, InnerMatcher) {
-  const Expr *RightHandSide = Node.getRHS();
+  const Expr *RightHandSide = internal::getRHS(Node);
   return (RightHandSide != nullptr &&
           InnerMatcher.matches(*RightHandSide, Finder, Builder));
 }
 
 /// Matches if either the left hand side or the right hand side of a
 /// binary operator matches.
-inline internal::Matcher<BinaryOperator> hasEitherOperand(
-    const internal::Matcher<Expr> &InnerMatcher) {
-  return anyOf(hasLHS(InnerMatcher), hasRHS(InnerMatcher));
+AST_POLYMORPHIC_MATCHER_P(hasEitherOperand,
+                          AST_POLYMORPHIC_SUPPORTED_TYPES(BinaryOperator,
+                                                          CXXOperatorCallExpr),
+                          internal::Matcher<Expr>, InnerMatcher) {
+  return internal::VariadicDynCastAllOfMatcher<Stmt, NodeType>()(
+             anyOf(hasLHS(InnerMatcher), hasRHS(InnerMatcher)))
+      .matches(Node, Finder, Builder);
 }
 
 /// Matches if both matchers match with opposite sides of the binary operator.
@@ -5266,11 +5312,15 @@ inline internal::Matcher<BinaryOperator> hasEitherOperand(
 ///   1 + 1 // No match
 ///   2 + 2 // No match
 /// \endcode
-inline internal::Matcher<BinaryOperator>
-hasOperands(const internal::Matcher<Expr> &Matcher1,
-            const internal::Matcher<Expr> &Matcher2) {
-  return anyOf(allOf(hasLHS(Matcher1), hasRHS(Matcher2)),
-               allOf(hasLHS(Matcher2), hasRHS(Matcher1)));
+AST_POLYMORPHIC_MATCHER_P2(hasOperands,
+                           AST_POLYMORPHIC_SUPPORTED_TYPES(BinaryOperator,
+                                                           CXXOperatorCallExpr),
+                           internal::Matcher<Expr>, Matcher1,
+                           internal::Matcher<Expr>, Matcher2) {
+  return internal::VariadicDynCastAllOfMatcher<Stmt, NodeType>()(
+             anyOf(allOf(hasLHS(Matcher1), hasRHS(Matcher2)),
+                   allOf(hasLHS(Matcher2), hasRHS(Matcher1))))
+      .matches(Node, Finder, Builder);
 }
 
 /// Matches if the operand of a unary operator matches.
@@ -5280,9 +5330,11 @@ hasOperands(const internal::Matcher<Expr> &Matcher1,
 /// \code
 ///   !true
 /// \endcode
-AST_MATCHER_P(UnaryOperator, hasUnaryOperand,
-              internal::Matcher<Expr>, InnerMatcher) {
-  const Expr * const Operand = Node.getSubExpr();
+AST_POLYMORPHIC_MATCHER_P(hasUnaryOperand,
+                          AST_POLYMORPHIC_SUPPORTED_TYPES(UnaryOperator,
+                                                          CXXOperatorCallExpr),
+                          internal::Matcher<Expr>, InnerMatcher) {
+  const Expr *const Operand = internal::getSubExpr(Node);
   return (Operand != nullptr &&
           InnerMatcher.matches(*Operand, Finder, Builder));
 }
