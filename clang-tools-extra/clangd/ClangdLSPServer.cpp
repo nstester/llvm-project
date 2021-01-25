@@ -316,14 +316,6 @@ public:
     };
   }
 
-  template <>
-  void bind<NoParams>(const char *Method,
-                      void (ClangdLSPServer::*Handler)(const NoParams &)) {
-    Notifications[Method] = [Handler, this](llvm::json::Value RawParams) {
-      (Server.*Handler)(NoParams{});
-    };
-  }
-
 private:
   // Function object to reply to an LSP call.
   // Each instance must be called exactly once, otherwise:
@@ -465,6 +457,14 @@ private:
   ClangdLSPServer &Server;
 };
 constexpr int ClangdLSPServer::MessageHandler::MaxReplayCallbacks;
+
+template <>
+void ClangdLSPServer::MessageHandler::bind<NoParams>(
+    const char *Method, void (ClangdLSPServer::*Handler)(const NoParams &)) {
+  Notifications[Method] = [Handler, this](llvm::json::Value RawParams) {
+    (Server.*Handler)(NoParams{});
+  };
+}
 
 // call(), notify(), and reply() wrap the Transport, adding logging and locking.
 void ClangdLSPServer::callRaw(StringRef Method, llvm::json::Value Params,
