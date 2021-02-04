@@ -193,6 +193,7 @@ public:
       End += Context.size() - Right - 1;
       I++;
       Context.resize(End);
+      MaxDedupSize = std::min(static_cast<uint32_t>(End / 2), MaxDedupSize);
     }
   }
 
