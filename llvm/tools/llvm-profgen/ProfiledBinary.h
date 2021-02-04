@@ -236,14 +236,15 @@ public:
   // Get the context string of the current stack with inline context filled in.
   // It will search the disassembling info stored in Offset2LocStackMap. This is
   // used as the key of function sample map
-  std::string getExpandedContextStr(const std::list<uint64_t> &stack) const;
+  std::string
+  getExpandedContextStr(const SmallVectorImpl<uint64_t> &Stack) const;
 
   const PseudoProbe *getCallProbeForAddr(uint64_t Address) const {
     return ProbeDecoder.getCallProbeForAddr(Address);
   }
   void
   getInlineContextForProbe(const PseudoProbe *Probe,
-                           SmallVector<std::string, 16> &InlineContextStack,
+                           SmallVectorImpl<std::string> &InlineContextStack,
                            bool IncludeLeaf = false) const {
     return ProbeDecoder.getInlineContextForProbe(Probe, InlineContextStack,
                                                  IncludeLeaf);
