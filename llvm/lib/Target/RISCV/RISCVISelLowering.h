@@ -89,6 +89,12 @@ enum NodeType : unsigned {
   GORCI,
   GORCIW,
   // Vector Extension
+  // VMV_V_X_VL matches the semantics of vmv.v.x but includes an extra operand
+  // for the VL value to be used for the operation.
+  VMV_V_X_VL,
+  // VFMV_V_F_VL matches the semantics of vfmv.v.f but includes an extra operand
+  // for the VL value to be used for the operation.
+  VFMV_V_F_VL,
   // VMV_X_S matches the semantics of vmv.x.s. The result is always XLenVT sign
   // extended from the vector element size.
   VMV_X_S,
@@ -154,6 +160,7 @@ enum NodeType : unsigned {
   FMUL_VL,
   FDIV_VL,
   FNEG_VL,
+  FMA_VL,
 
   // Set mask vector to all zeros or ones.
   VMCLR_VL,
