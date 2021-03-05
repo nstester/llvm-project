@@ -407,7 +407,11 @@ void ObjFile::parseSymbols(ArrayRef<structs::nlist_64> nList,
 
     const section_64 &sec = sectionHeaders[sym.n_sect - 1];
     SubsectionMap &subsecMap = subsections[sym.n_sect - 1];
-    assert(!subsecMap.empty());
+
+    // parseSections() may have chosen not to parse this section.
+    if (subsecMap.empty())
+      continue;
+
     uint64_t offset = sym.n_value - sec.addr;
 
     // If the input file does not use subsections-via-symbols, all symbols can
@@ -544,9 +548,10 @@ void ObjFile::parseDebugInfo() {
   // TODO: Since object files can contain a lot of DWARF info, we should verify
   // that we are parsing just the info we need
   const DWARFContext::compile_unit_range &units = ctx->compile_units();
+  // FIXME: There can be more than one compile unit per object file. See
+  // PR48637.
   auto it = units.begin();
   compileUnit = it->get();
-  assert(std::next(it) == units.end());
 }
 
 // The path can point to either a dylib or a .tbd file.
