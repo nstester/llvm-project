@@ -2506,7 +2506,6 @@ void Generic_GCC::GCCInstallationDetector::ScanLibDirForGCCTriple(
     const llvm::Triple &TargetTriple, const ArgList &Args,
     const std::string &LibDir, StringRef CandidateTriple,
     bool NeedsBiarchSuffix, bool GCCDirExists, bool GCCCrossDirExists) {
-  llvm::Triple::ArchType TargetArch = TargetTriple.getArch();
   // Locations relative to the system lib directory where GCC's triple-specific
   // directories might reside.
   struct GCCLibSuffix {
@@ -2530,15 +2529,7 @@ void Generic_GCC::GCCInstallationDetector::ScanLibDirForGCCTriple(
       // files in that location, not just GCC installation data.
       {CandidateTriple.str(), "..",
        TargetTriple.getVendor() == llvm::Triple::Freescale ||
-       TargetTriple.getVendor() == llvm::Triple::OpenEmbedded},
-
-      // Deal with cases (on Ubuntu) where the system architecture could be i386
-      // but the GCC target architecture could be (say) i686.
-      // FIXME: It may be worthwhile to generalize this and look for a second
-      // triple.
-      {"i386-linux-gnu/gcc/" + CandidateTriple.str(), "../../..",
-       (TargetArch == llvm::Triple::x86 &&
-        TargetTriple.getOS() != llvm::Triple::Solaris)}};
+           TargetTriple.getVendor() == llvm::Triple::OpenEmbedded}};
 
   for (auto &Suffix : Suffixes) {
     if (!Suffix.Active)
@@ -2843,19 +2834,7 @@ void Generic_GCC::AddMultilibPaths(const Driver &D,
                         SelectedMultilib.osSuffix(),
                     Paths);
 
-    // If the GCC installation we found is inside of the sysroot, we want to
-    // prefer libraries installed in the parent prefix of the GCC installation.
-    // It is important to *not* use these paths when the GCC installation is
-    // outside of the system root as that can pick up unintended libraries.
-    // This usually happens when there is an external cross compiler on the
-    // host system, and a more minimal sysroot available that is the target of
-    // the cross. Note that GCC does include some of these directories in some
-    // configurations but this seems somewhere between questionable and simply
-    // a bug.
-    if (StringRef(LibPath).startswith(SysRoot)) {
-      addPathIfExists(D, LibPath + "/" + MultiarchTriple, Paths);
-      addPathIfExists(D, LibPath + "/../" + OSLibDir, Paths);
-    }
+    addPathIfExists(D, LibPath + "/../" + OSLibDir, Paths);
   }
 }
 
@@ -2866,11 +2845,6 @@ void Generic_GCC::AddMultiarchPaths(const Driver &D,
   // Try walking via the GCC triple path in case of biarch or multiarch GCC
   // installations with strange symlinks.
   if (GCCInstallation.isValid()) {
-    addPathIfExists(D,
-                    SysRoot + "/usr/lib/" + GCCInstallation.getTriple().str() +
-                        "/../../" + OSLibDir,
-                    Paths);
-
     // Add the 'other' biarch variant path
     Multilib BiarchSibling;
     if (GCCInstallation.getBiarchSibling(BiarchSibling)) {
@@ -2879,8 +2853,6 @@ void Generic_GCC::AddMultiarchPaths(const Driver &D,
                       Paths);
     }
 
-    // See comments above on the multilib variant for details of why this is
-    // included even from outside the sysroot.
     const std::string &LibPath =
         std::string(GCCInstallation.getParentLibPath());
     const llvm::Triple &GCCTriple = GCCInstallation.getTriple();
@@ -2888,24 +2860,26 @@ void Generic_GCC::AddMultiarchPaths(const Driver &D,
     addPathIfExists(
         D, LibPath + "/../" + GCCTriple.str() + "/lib" + Multilib.osSuffix(),
                     Paths);
-
-    // See comments above on the multilib variant for details of why this is
-    // only included from within the sysroot.
-    if (StringRef(LibPath).startswith(SysRoot))
-      addPathIfExists(D, LibPath, Paths);
+    addPathIfExists(D, LibPath, Paths);
   }
 }
 
 void Generic_GCC::AddMultilibIncludeArgs(const ArgList &DriverArgs,
                                          ArgStringList &CC1Args) const {
   // Add include directories specific to the selected multilib set and multilib.
-  if (GCCInstallation.isValid()) {
-    const auto &Callback = Multilibs.includeDirsCallback();
-    if (Callback) {
-      for (const auto &Path : Callback(GCCInstallation.getMultilib()))
-        addExternCSystemIncludeIfExists(
-            DriverArgs, CC1Args, GCCInstallation.getInstallPath() + Path);
-    }
+  if (!GCCInstallation.isValid())
+    return;
+  // gcc TOOL_INCLUDE_DIR.
+  const llvm::Triple &GCCTriple = GCCInstallation.getTriple();
+  std::string LibPath(GCCInstallation.getParentLibPath());
+  addSystemInclude(DriverArgs, CC1Args,
+                   Twine(LibPath) + "/../" + GCCTriple.str() + "/include");
+
+  const auto &Callback = Multilibs.includeDirsCallback();
+  if (Callback) {
+    for (const auto &Path : Callback(GCCInstallation.getMultilib()))
+      addExternCSystemIncludeIfExists(DriverArgs, CC1Args,
+                                      GCCInstallation.getInstallPath() + Path);
   }
 }
 
