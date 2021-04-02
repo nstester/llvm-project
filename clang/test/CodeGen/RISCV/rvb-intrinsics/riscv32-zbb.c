@@ -2,7 +2,7 @@
 // RUN: %clang_cc1 -triple riscv32 -target-feature +experimental-zbb -emit-llvm %s -o - \
 // RUN:     | FileCheck %s  -check-prefix=RV32ZBB
 
-// RV32ZBB-LABEL: @orcb32(
+// RV32ZBB-LABEL: @orc_b_32(
 // RV32ZBB-NEXT:  entry:
 // RV32ZBB-NEXT:    [[A_ADDR:%.*]] = alloca i32, align 4
 // RV32ZBB-NEXT:    store i32 [[A:%.*]], i32* [[A_ADDR]], align 4
@@ -10,6 +10,6 @@
 // RV32ZBB-NEXT:    [[TMP1:%.*]] = call i32 @llvm.riscv.orc.b.i32(i32 [[TMP0]])
 // RV32ZBB-NEXT:    ret i32 [[TMP1]]
 //
-int orcb32(int a) {
+int orc_b_32(int a) {
   return __builtin_riscv_orc_b_32(a);
 }
