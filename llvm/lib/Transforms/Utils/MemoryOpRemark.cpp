@@ -324,8 +324,8 @@ void MemoryOpRemark::visitVariable(const Value *V,
 
 void MemoryOpRemark::visitPtr(Value *Ptr, bool IsRead, OptimizationRemarkMissed &R) {
   // Find if Ptr is a known variable we can give more information on.
-  SmallVector<const Value *, 2> Objects;
-  getUnderlyingObjects(Ptr, Objects);
+  SmallVector<Value *, 2> Objects;
+  getUnderlyingObjectsForCodeGen(Ptr, Objects);
   SmallVector<VariableInfo, 2> VIs;
   for (const Value *V : Objects)
     visitVariable(V, VIs);
@@ -339,7 +339,7 @@ void MemoryOpRemark::visitPtr(Value *Ptr, bool IsRead, OptimizationRemarkMissed 
     VIs.push_back({None, Size});
   }
 
-  R << (IsRead ? "\nRead Variables: " : "\nWritten Variables: ");
+  R << (IsRead ? "\n Read Variables: " : "\n Written Variables: ");
   for (unsigned i = 0; i < VIs.size(); ++i) {
     const VariableInfo &VI = VIs[i];
     assert(!VI.isEmpty() && "No extra content to display.");

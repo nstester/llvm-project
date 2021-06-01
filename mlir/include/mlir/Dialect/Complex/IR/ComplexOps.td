@@ -88,7 +88,7 @@ def CreateOp : Complex_Op<"create",
 
   let summary = "complex number creation operation";
   let description = [{
-    The `complex.complex` operation creates a complex number from two
+    The `complex.create` operation creates a complex number from two
     floating-point operands, the real and the imaginary part.
 
     Example:
@@ -102,6 +102,7 @@ def CreateOp : Complex_Op<"create",
   let results = (outs Complex<AnyFloat>:$complex);
 
   let assemblyFormat = "$real `,` $imaginary attr-dict `:` type($complex)";
+  let hasFolder = 1;
 }
 
 //===----------------------------------------------------------------------===//
@@ -152,7 +153,9 @@ def ImOp : Complex_Op<"im",
 //===----------------------------------------------------------------------===//
 
 def EqualOp : Complex_Op<"eq",
-    [NoSideEffect, AllTypesMatch<["lhs", "rhs"]>]> {
+    [NoSideEffect, AllTypesMatch<["lhs", "rhs"]>,
+    DeclareOpInterfaceMethods<VectorUnrollOpInterface>] #
+    ElementwiseMappable.traits> {
   let summary = "computes whether two complex values are equal";
   let description = [{
     The `eq` op takes two complex numbers and returns whether they are equal.
@@ -166,6 +169,10 @@ def EqualOp : Complex_Op<"eq",
 
   let arguments = (ins Complex<AnyFloat>:$lhs, Complex<AnyFloat>:$rhs);
   let results = (outs I1:$result);
+  let builders = [
+    OpBuilder<(ins "Value":$lhs, "Value":$rhs), [{
+      build($_builder, $_state, $_builder.getI1Type(), lhs, rhs);
+    }]>];
 
   let assemblyFormat = "$lhs `,` $rhs  attr-dict `:` type($lhs)";
 }
@@ -190,7 +197,9 @@ def MulOp : ComplexArithmeticOp<"mul"> {
 //===----------------------------------------------------------------------===//
 
 def NotEqualOp : Complex_Op<"neq",
-    [NoSideEffect, AllTypesMatch<["lhs", "rhs"]>]> {
+    [NoSideEffect, AllTypesMatch<["lhs", "rhs"]>,
+    DeclareOpInterfaceMethods<VectorUnrollOpInterface>] #
+    ElementwiseMappable.traits> {
   let summary = "computes whether two complex values are not equal";
   let description = [{
     The `neq` op takes two complex numbers and returns whether they are not
@@ -205,6 +214,10 @@ def NotEqualOp : Complex_Op<"neq",
 
   let arguments = (ins Complex<AnyFloat>:$lhs, Complex<AnyFloat>:$rhs);
   let results = (outs I1:$result);
+  let builders = [
+    OpBuilder<(ins "Value":$lhs, "Value":$rhs), [{
+      build($_builder, $_state, $_builder.getI1Type(), lhs, rhs);
+    }]>];
 
   let assemblyFormat = "$lhs `,` $rhs  attr-dict `:` type($lhs)";
 }
