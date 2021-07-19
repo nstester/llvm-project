@@ -1,5 +1,5 @@
 set(LLVM_LINK_COMPONENTS
-  InterfaceStub
+  InterfaceStub  
   Object
   Support
   TextAPI
@@ -7,5 +7,6 @@ set(LLVM_LINK_COMPONENTS
   )
 
 add_llvm_tool(llvm-ifs
+  ErrorCollector.cpp
   llvm-ifs.cpp
   )
