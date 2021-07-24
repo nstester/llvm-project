@@ -3,7 +3,7 @@
 ; RUN: opt < %s -basic-aa -licm -S -enable-mssa-loop-dependency=true -verify-memoryssa | FileCheck %s
 
 
-declare i32 @strlen(i8*) readonly nounwind
+declare i32 @strlen(i8*) readonly nounwind willreturn
 
 declare void @foo()
 
@@ -27,7 +27,7 @@ Out:		; preds = %Loop
   ret i32 %A
 }
 
-declare double @sin(double) readnone nounwind
+declare double @sin(double) readnone nounwind willreturn
 
 ; Sink readnone function out of loop with unknown memory behavior.
 define double @test2(double %X) {
@@ -977,6 +977,28 @@ lpadBBSucc1:
 
 try.cont:
   ret void
+}
+
+; TODO: Should not get sunk.
+define i32 @not_willreturn(i8* %p) {
+; CHECK-LABEL: @not_willreturn(
+; CHECK-NEXT:    br label [[LOOP:%.*]]
+; CHECK:       loop:
+; CHECK-NEXT:    store volatile i8 0, i8* [[P:%.*]], align 1
+; CHECK-NEXT:    br i1 true, label [[LOOP]], label [[OUT:%.*]]
+; CHECK:       out:
+; CHECK-NEXT:    [[X_LE:%.*]] = call i32 @getv() #[[ATTR5:[0-9]+]]
+; CHECK-NEXT:    ret i32 [[X_LE]]
+;
+  br label %loop
+
+loop:
+  %x = call i32 @getv() nounwind readnone
+  store volatile i8 0, i8* %p
+  br i1 true, label %loop, label %out
+
+out:
+  ret i32 %x
 }
 
 declare void @may_throw()
