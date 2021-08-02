@@ -190,45 +190,26 @@ MBlock* MetaMap::GetBlock(uptr p) {
   }
 }
 
-SyncVar* MetaMap::GetOrCreateAndLock(ThreadState *thr, uptr pc,
-                              uptr addr, bool write_lock) {
-  return GetAndLock(thr, pc, addr, write_lock, true);
-}
-
-SyncVar* MetaMap::GetIfExistsAndLock(uptr addr, bool write_lock) {
-  return GetAndLock(0, 0, addr, write_lock, false);
-}
-
-SyncVar *MetaMap::GetAndLock(ThreadState *thr, uptr pc, uptr addr, bool write_lock,
-                             bool create) NO_THREAD_SAFETY_ANALYSIS {
+SyncVar *MetaMap::GetSync(ThreadState *thr, uptr pc, uptr addr, bool create) {
   u32 *meta = MemToMeta(addr);
   u32 idx0 = *meta;
   u32 myidx = 0;
-  SyncVar *mys = 0;
+  SyncVar *mys = nullptr;
   for (;;) {
-    u32 idx = idx0;
-    for (;;) {
-      if (idx == 0)
-        break;
-      if (idx & kFlagBlock)
-        break;
+    for (u32 idx = idx0; idx && !(idx & kFlagBlock);) {
       DCHECK(idx & kFlagSync);
       SyncVar * s = sync_alloc_.Map(idx & ~kFlagMask);
-      if (s->addr == addr) {
-        if (myidx != 0) {
+      if (LIKELY(s->addr == addr)) {
+        if (UNLIKELY(myidx != 0)) {
           mys->Reset(thr->proc());
           sync_alloc_.Free(&thr->proc()->sync_cache, myidx);
         }
-        if (write_lock)
-          s->mtx.Lock();
-        else
-          s->mtx.ReadLock();
         return s;
       }
       idx = s->next;
     }
     if (!create)
-      return 0;
+      return nullptr;
     if (*meta != idx0) {
       idx0 = *meta;
       continue;
@@ -243,10 +224,6 @@ SyncVar *MetaMap::GetAndLock(ThreadState *thr, uptr pc, uptr addr, bool write_lo
     mys->next = idx0;
     if (atomic_compare_exchange_strong((atomic_uint32_t*)meta, &idx0,
         myidx | kFlagSync, memory_order_release)) {
-      if (write_lock)
-        mys->mtx.Lock();
-      else
-        mys->mtx.ReadLock();
       return mys;
     }
   }
