@@ -19,85 +19,79 @@
 using namespace __tsan;
 
 void __tsan_read1(void *addr) {
-  MemoryRead(cur_thread(), CALLERPC, (uptr)addr, kSizeLog1);
+  MemoryAccess(cur_thread(), CALLERPC, (uptr)addr, 1, kAccessRead);
 }
 
 void __tsan_read2(void *addr) {
-  MemoryRead(cur_thread(), CALLERPC, (uptr)addr, kSizeLog2);
+  MemoryAccess(cur_thread(), CALLERPC, (uptr)addr, 2, kAccessRead);
 }
 
 void __tsan_read4(void *addr) {
-  MemoryRead(cur_thread(), CALLERPC, (uptr)addr, kSizeLog4);
+  MemoryAccess(cur_thread(), CALLERPC, (uptr)addr, 4, kAccessRead);
 }
 
 void __tsan_read8(void *addr) {
-  MemoryRead(cur_thread(), CALLERPC, (uptr)addr, kSizeLog8);
+  MemoryAccess(cur_thread(), CALLERPC, (uptr)addr, 8, kAccessRead);
 }
 
 void __tsan_write1(void *addr) {
-  MemoryWrite(cur_thread(), CALLERPC, (uptr)addr, kSizeLog1);
+  MemoryAccess(cur_thread(), CALLERPC, (uptr)addr, 1, kAccessWrite);
 }
 
 void __tsan_write2(void *addr) {
-  MemoryWrite(cur_thread(), CALLERPC, (uptr)addr, kSizeLog2);
+  MemoryAccess(cur_thread(), CALLERPC, (uptr)addr, 2, kAccessWrite);
 }
 
 void __tsan_write4(void *addr) {
-  MemoryWrite(cur_thread(), CALLERPC, (uptr)addr, kSizeLog4);
+  MemoryAccess(cur_thread(), CALLERPC, (uptr)addr, 4, kAccessWrite);
 }
 
 void __tsan_write8(void *addr) {
-  MemoryWrite(cur_thread(), CALLERPC, (uptr)addr, kSizeLog8);
+  MemoryAccess(cur_thread(), CALLERPC, (uptr)addr, 8, kAccessWrite);
 }
 
 void __tsan_read1_pc(void *addr, void *pc) {
-  MemoryRead(cur_thread(), STRIP_PAC_PC(pc), (uptr)addr, kSizeLog1);
+  MemoryAccess(cur_thread(), STRIP_PAC_PC(pc), (uptr)addr, 1, kAccessRead);
 }
 
 void __tsan_read2_pc(void *addr, void *pc) {
-  MemoryRead(cur_thread(), STRIP_PAC_PC(pc), (uptr)addr, kSizeLog2);
+  MemoryAccess(cur_thread(), STRIP_PAC_PC(pc), (uptr)addr, 2, kAccessRead);
 }
 
 void __tsan_read4_pc(void *addr, void *pc) {
-  MemoryRead(cur_thread(), STRIP_PAC_PC(pc), (uptr)addr, kSizeLog4);
+  MemoryAccess(cur_thread(), STRIP_PAC_PC(pc), (uptr)addr, 4, kAccessRead);
 }
 
 void __tsan_read8_pc(void *addr, void *pc) {
-  MemoryRead(cur_thread(), STRIP_PAC_PC(pc), (uptr)addr, kSizeLog8);
+  MemoryAccess(cur_thread(), STRIP_PAC_PC(pc), (uptr)addr, 8, kAccessRead);
 }
 
 void __tsan_write1_pc(void *addr, void *pc) {
-  MemoryWrite(cur_thread(), STRIP_PAC_PC(pc), (uptr)addr, kSizeLog1);
+  MemoryAccess(cur_thread(), STRIP_PAC_PC(pc), (uptr)addr, 1, kAccessWrite);
 }
 
 void __tsan_write2_pc(void *addr, void *pc) {
-  MemoryWrite(cur_thread(), STRIP_PAC_PC(pc), (uptr)addr, kSizeLog2);
+  MemoryAccess(cur_thread(), STRIP_PAC_PC(pc), (uptr)addr, 2, kAccessWrite);
 }
 
 void __tsan_write4_pc(void *addr, void *pc) {
-  MemoryWrite(cur_thread(), STRIP_PAC_PC(pc), (uptr)addr, kSizeLog4);
+  MemoryAccess(cur_thread(), STRIP_PAC_PC(pc), (uptr)addr, 4, kAccessWrite);
 }
 
 void __tsan_write8_pc(void *addr, void *pc) {
-  MemoryWrite(cur_thread(), STRIP_PAC_PC(pc), (uptr)addr, kSizeLog8);
+  MemoryAccess(cur_thread(), STRIP_PAC_PC(pc), (uptr)addr, 8, kAccessWrite);
 }
 
 void __tsan_vptr_update(void **vptr_p, void *new_val) {
-  CHECK_EQ(sizeof(vptr_p), 8);
-  if (*vptr_p != new_val) {
-    ThreadState *thr = cur_thread();
-    thr->is_vptr_access = true;
-    MemoryWrite(thr, CALLERPC, (uptr)vptr_p, kSizeLog8);
-    thr->is_vptr_access = false;
-  }
+  if (*vptr_p == new_val)
+    return;
+  MemoryAccess(cur_thread(), CALLERPC, (uptr)vptr_p, sizeof(*vptr_p),
+               kAccessWrite | kAccessVptr);
 }
 
 void __tsan_vptr_read(void **vptr_p) {
-  CHECK_EQ(sizeof(vptr_p), 8);
-  ThreadState *thr = cur_thread();
-  thr->is_vptr_access = true;
-  MemoryRead(thr, CALLERPC, (uptr)vptr_p, kSizeLog8);
-  thr->is_vptr_access = false;
+  MemoryAccess(cur_thread(), CALLERPC, (uptr)vptr_p, sizeof(*vptr_p),
+               kAccessRead | kAccessVptr);
 }
 
 void __tsan_func_entry(void *pc) { FuncEntry(cur_thread(), STRIP_PAC_PC(pc)); }
