@@ -23,21 +23,6 @@
 
 namespace __tsan {
 
-#if defined(__x86_64__)
-#define HAS_48_BIT_ADDRESS_SPACE 1
-#elif SANITIZER_IOSSIM // arm64 iOS simulators (order of #if matters)
-#define HAS_48_BIT_ADDRESS_SPACE 1
-#elif SANITIZER_IOS // arm64 iOS devices (order of #if matters)
-#define HAS_48_BIT_ADDRESS_SPACE 0
-#elif SANITIZER_MAC // arm64 macOS (order of #if matters)
-#define HAS_48_BIT_ADDRESS_SPACE 1
-#else
-#define HAS_48_BIT_ADDRESS_SPACE 0
-#endif
-
-#if !SANITIZER_GO
-
-#if HAS_48_BIT_ADDRESS_SPACE
 /*
 C/C++ on linux/x86_64 and freebsd/x86_64
 0000 0000 1000 - 0080 0000 0000: main binary and/or MAP_32BIT mappings (512GB)
@@ -65,9 +50,8 @@ C/C++ on netbsd/amd64 can reuse the same mapping:
  * Stack on NetBSD/amd64 has prereserved 128MB.
  * Heap grows downwards (top-down).
  * ASLR must be disabled per-process or globally.
-
 */
-struct Mapping {
+struct Mapping48AddressSpace {
   static const uptr kMetaShadowBeg = 0x300000000000ull;
   static const uptr kMetaShadowEnd = 0x340000000000ull;
   static const uptr kTraceMemBeg   = 0x600000000000ull;
@@ -87,8 +71,6 @@ struct Mapping {
   static const uptr kVdsoBeg       = 0xf000000000000000ull;
 };
 
-#define TSAN_MID_APP_RANGE 1
-#elif defined(__mips64)
 /*
 C/C++ on linux/mips64 (40-bit VMA)
 0000 0000 00 - 0100 0000 00: -                                           (4 GB)
@@ -105,7 +87,7 @@ fe00 0000 00 - ff00 0000 00: heap                                        (4 GB)
 ff00 0000 00 - ff80 0000 00: -                                           (2 GB)
 ff80 0000 00 - ffff ffff ff: modules and main thread stack              (<2 GB)
 */
-struct Mapping40 {
+struct MappingMips64_40 {
   static const uptr kMetaShadowBeg = 0x4000000000ull;
   static const uptr kMetaShadowEnd = 0x5000000000ull;
   static const uptr kTraceMemBeg   = 0xb000000000ull;
@@ -125,9 +107,6 @@ struct Mapping40 {
   static const uptr kVdsoBeg       = 0xfffff00000ull;
 };
 
-#define TSAN_MID_APP_RANGE 1
-#define TSAN_RUNTIME_VMA 1
-#elif defined(__aarch64__) && defined(__APPLE__)
 /*
 C/C++ on Darwin/iOS/ARM64 (36-bit VMA, 64 GB VM)
 0000 0000 00 - 0100 0000 00: -                                    (4 GB)
@@ -141,7 +120,7 @@ C/C++ on Darwin/iOS/ARM64 (36-bit VMA, 64 GB VM)
 0f00 0000 00 - 0fc0 0000 00: traces                               (3 GB)
 0fc0 0000 00 - 1000 0000 00: -
 */
-struct Mapping {
+struct MappingAppleAarch64 {
   static const uptr kLoAppMemBeg   = 0x0100000000ull;
   static const uptr kLoAppMemEnd   = 0x0200000000ull;
   static const uptr kHeapMemBeg    = 0x0200000000ull;
@@ -157,14 +136,9 @@ struct Mapping {
   static const uptr kAppMemMsk     =          0x0ull;
   static const uptr kAppMemXor     =          0x0ull;
   static const uptr kVdsoBeg       = 0x7000000000000000ull;
+  static const uptr kMidAppMemBeg = 0;
+  static const uptr kMidAppMemEnd = 0;
 };
-
-#elif defined(__aarch64__) && !defined(__APPLE__)
-// AArch64 supports multiple VMA which leads to multiple address transformation
-// functions.  To support these multiple VMAS transformations and mappings TSAN
-// runtime for AArch64 uses an external memory read (vmaSize) to select which
-// mapping to use.  Although slower, it make a same instrumented binary run on
-// multiple kernels.
 
 /*
 C/C++ on linux/aarch64 (39-bit VMA)
@@ -181,7 +155,7 @@ C/C++ on linux/aarch64 (39-bit VMA)
 7c00 0000 00 - 7d00 0000 00: heap
 7d00 0000 00 - 7fff ffff ff: modules and main thread stack
 */
-struct Mapping39 {
+struct MappingAarch64_39 {
   static const uptr kLoAppMemBeg   = 0x0000001000ull;
   static const uptr kLoAppMemEnd   = 0x0100000000ull;
   static const uptr kShadowBeg     = 0x0800000000ull;
@@ -216,7 +190,7 @@ C/C++ on linux/aarch64 (42-bit VMA)
 3e000 0000 00 - 3f000 0000 00: heap
 3f000 0000 00 - 3ffff ffff ff: modules and main thread stack
 */
-struct Mapping42 {
+struct MappingAarch64_42 {
   static const uptr kLoAppMemBeg   = 0x00000001000ull;
   static const uptr kLoAppMemEnd   = 0x01000000000ull;
   static const uptr kShadowBeg     = 0x10000000000ull;
@@ -236,7 +210,7 @@ struct Mapping42 {
   static const uptr kVdsoBeg       = 0x37f00000000ull;
 };
 
-struct Mapping48 {
+struct MappingAarch64_48 {
   static const uptr kLoAppMemBeg   = 0x0000000001000ull;
   static const uptr kLoAppMemEnd   = 0x0000200000000ull;
   static const uptr kShadowBeg     = 0x0002000000000ull;
@@ -256,17 +230,6 @@ struct Mapping48 {
   static const uptr kVdsoBeg       = 0xffff000000000ull;
 };
 
-// Indicates the runtime will define the memory regions at runtime.
-#define TSAN_RUNTIME_VMA 1
-// Indicates that mapping defines a mid range memory segment.
-#define TSAN_MID_APP_RANGE 1
-#elif defined(__powerpc64__)
-// PPC64 supports multiple VMA which leads to multiple address transformation
-// functions.  To support these multiple VMAS transformations and mappings TSAN
-// runtime for PPC64 uses an external memory read (vmaSize) to select which
-// mapping to use.  Although slower, it make a same instrumented binary run on
-// multiple kernels.
-
 /*
 C/C++ on linux/powerpc64 (44-bit VMA)
 0000 0000 0100 - 0001 0000 0000: main binary
@@ -281,7 +244,7 @@ C/C++ on linux/powerpc64 (44-bit VMA)
 0f50 0000 0000 - 0f60 0000 0000: -
 0f60 0000 0000 - 1000 0000 0000: modules and main thread stack
 */
-struct Mapping44 {
+struct MappingPPC64_44 {
   static const uptr kMetaShadowBeg = 0x0b0000000000ull;
   static const uptr kMetaShadowEnd = 0x0d0000000000ull;
   static const uptr kTraceMemBeg   = 0x0d0000000000ull;
@@ -297,6 +260,8 @@ struct Mapping44 {
   static const uptr kAppMemMsk     = 0x0f0000000000ull;
   static const uptr kAppMemXor     = 0x002100000000ull;
   static const uptr kVdsoBeg       = 0x3c0000000000000ull;
+  static const uptr kMidAppMemBeg = 0;
+  static const uptr kMidAppMemEnd = 0;
 };
 
 /*
@@ -313,7 +278,7 @@ C/C++ on linux/powerpc64 (46-bit VMA)
 3e00 0000 0000 - 3e80 0000 0000: -
 3e80 0000 0000 - 4000 0000 0000: modules and main thread stack
 */
-struct Mapping46 {
+struct MappingPPC64_46 {
   static const uptr kMetaShadowBeg = 0x100000000000ull;
   static const uptr kMetaShadowEnd = 0x200000000000ull;
   static const uptr kTraceMemBeg   = 0x200000000000ull;
@@ -329,6 +294,8 @@ struct Mapping46 {
   static const uptr kAppMemMsk     = 0x3c0000000000ull;
   static const uptr kAppMemXor     = 0x020000000000ull;
   static const uptr kVdsoBeg       = 0x7800000000000000ull;
+  static const uptr kMidAppMemBeg = 0;
+  static const uptr kMidAppMemEnd = 0;
 };
 
 /*
@@ -345,7 +312,7 @@ C/C++ on linux/powerpc64 (47-bit VMA)
 7e00 0000 0000 - 7e80 0000 0000: -
 7e80 0000 0000 - 8000 0000 0000: modules and main thread stack
 */
-struct Mapping47 {
+struct MappingPPC64_47 {
   static const uptr kMetaShadowBeg = 0x100000000000ull;
   static const uptr kMetaShadowEnd = 0x200000000000ull;
   static const uptr kTraceMemBeg   = 0x200000000000ull;
@@ -361,11 +328,10 @@ struct Mapping47 {
   static const uptr kAppMemMsk     = 0x7c0000000000ull;
   static const uptr kAppMemXor     = 0x020000000000ull;
   static const uptr kVdsoBeg       = 0x7800000000000000ull;
+  static const uptr kMidAppMemBeg = 0;
+  static const uptr kMidAppMemEnd = 0;
 };
 
-// Indicates the runtime will define the memory regions at runtime.
-#define TSAN_RUNTIME_VMA 1
-#elif defined(__s390x__)
 /*
 C/C++ on linux/s390x
 While the kernel provides a 64-bit address space, we have to restrict ourselves
@@ -380,7 +346,7 @@ a000 0000 0000 - b000 0000 0000: traces - 16TiB (max history * 128k threads)
 b000 0000 0000 - be00 0000 0000: -
 be00 0000 0000 - c000 0000 0000: heap - 2TiB (max supported by the allocator)
 */
-struct Mapping {
+struct MappingS390x {
   static const uptr kMetaShadowBeg = 0x900000000000ull;
   static const uptr kMetaShadowEnd = 0x980000000000ull;
   static const uptr kTraceMemBeg   = 0xa00000000000ull;
@@ -396,10 +362,9 @@ struct Mapping {
   static const uptr kAppMemMsk     = 0xb00000000000ull;
   static const uptr kAppMemXor     = 0x100000000000ull;
   static const uptr kVdsoBeg       = 0xfffffffff000ull;
+  static const uptr kMidAppMemBeg = 0;
+  static const uptr kMidAppMemEnd = 0;
 };
-#endif
-
-#elif SANITIZER_GO && !SANITIZER_WINDOWS && HAS_48_BIT_ADDRESS_SPACE
 
 /* Go on linux, darwin and freebsd on x86_64
 0000 0000 1000 - 0000 1000 0000: executable
@@ -414,18 +379,23 @@ struct Mapping {
 6200 0000 0000 - 8000 0000 0000: -
 */
 
-struct Mapping {
+struct MappingGo48 {
   static const uptr kMetaShadowBeg = 0x300000000000ull;
   static const uptr kMetaShadowEnd = 0x400000000000ull;
   static const uptr kTraceMemBeg   = 0x600000000000ull;
   static const uptr kTraceMemEnd   = 0x620000000000ull;
   static const uptr kShadowBeg     = 0x200000000000ull;
   static const uptr kShadowEnd     = 0x238000000000ull;
-  static const uptr kAppMemBeg     = 0x000000001000ull;
-  static const uptr kAppMemEnd     = 0x00e000000000ull;
+  static const uptr kLoAppMemBeg = 0x000000001000ull;
+  static const uptr kLoAppMemEnd = 0x00e000000000ull;
+  static const uptr kMidAppMemBeg = 0;
+  static const uptr kMidAppMemEnd = 0;
+  static const uptr kHiAppMemBeg = 0;
+  static const uptr kHiAppMemEnd = 0;
+  static const uptr kHeapMemBeg = 0;
+  static const uptr kHeapMemEnd = 0;
+  static const uptr kVdsoBeg = 0;
 };
-
-#elif SANITIZER_GO && SANITIZER_WINDOWS
 
 /* Go on windows
 0000 0000 1000 - 0000 1000 0000: executable
@@ -439,20 +409,23 @@ struct Mapping {
 07d0 0000 0000 - 8000 0000 0000: -
 */
 
-struct Mapping {
+struct MappingGoWindows {
   static const uptr kMetaShadowBeg = 0x076000000000ull;
   static const uptr kMetaShadowEnd = 0x07d000000000ull;
   static const uptr kTraceMemBeg   = 0x056000000000ull;
   static const uptr kTraceMemEnd   = 0x076000000000ull;
   static const uptr kShadowBeg     = 0x010000000000ull;
   static const uptr kShadowEnd     = 0x050000000000ull;
-  static const uptr kAppMemBeg     = 0x000000001000ull;
-  static const uptr kAppMemEnd     = 0x00e000000000ull;
+  static const uptr kLoAppMemBeg = 0x000000001000ull;
+  static const uptr kLoAppMemEnd = 0x00e000000000ull;
+  static const uptr kMidAppMemBeg = 0;
+  static const uptr kMidAppMemEnd = 0;
+  static const uptr kHiAppMemBeg = 0;
+  static const uptr kHiAppMemEnd = 0;
+  static const uptr kHeapMemBeg = 0;
+  static const uptr kHeapMemEnd = 0;
+  static const uptr kVdsoBeg = 0;
 };
-
-#elif SANITIZER_GO && defined(__powerpc64__)
-
-/* Only Mapping46 and Mapping47 are currently supported for powercp64 on Go. */
 
 /* Go on linux/powerpc64 (46-bit VMA)
 0000 0000 1000 - 0000 1000 0000: executable
@@ -467,15 +440,22 @@ struct Mapping {
 3800 0000 0000 - 4000 0000 0000: -
 */
 
-struct Mapping46 {
+struct MappingGoPPC64_46 {
   static const uptr kMetaShadowBeg = 0x240000000000ull;
   static const uptr kMetaShadowEnd = 0x340000000000ull;
   static const uptr kTraceMemBeg   = 0x360000000000ull;
   static const uptr kTraceMemEnd   = 0x380000000000ull;
   static const uptr kShadowBeg     = 0x200000000000ull;
   static const uptr kShadowEnd     = 0x238000000000ull;
-  static const uptr kAppMemBeg     = 0x000000001000ull;
-  static const uptr kAppMemEnd     = 0x00e000000000ull;
+  static const uptr kLoAppMemBeg = 0x000000001000ull;
+  static const uptr kLoAppMemEnd = 0x00e000000000ull;
+  static const uptr kMidAppMemBeg = 0;
+  static const uptr kMidAppMemEnd = 0;
+  static const uptr kHiAppMemBeg = 0;
+  static const uptr kHiAppMemEnd = 0;
+  static const uptr kHeapMemBeg = 0;
+  static const uptr kHeapMemEnd = 0;
+  static const uptr kVdsoBeg = 0;
 };
 
 /* Go on linux/powerpc64 (47-bit VMA)
@@ -491,20 +471,23 @@ struct Mapping46 {
 6200 0000 0000 - 8000 0000 0000: -
 */
 
-struct Mapping47 {
+struct MappingGoPPC64_47 {
   static const uptr kMetaShadowBeg = 0x300000000000ull;
   static const uptr kMetaShadowEnd = 0x400000000000ull;
   static const uptr kTraceMemBeg   = 0x600000000000ull;
   static const uptr kTraceMemEnd   = 0x620000000000ull;
   static const uptr kShadowBeg     = 0x200000000000ull;
   static const uptr kShadowEnd     = 0x300000000000ull;
-  static const uptr kAppMemBeg     = 0x000000001000ull;
-  static const uptr kAppMemEnd     = 0x00e000000000ull;
+  static const uptr kLoAppMemBeg = 0x000000001000ull;
+  static const uptr kLoAppMemEnd = 0x00e000000000ull;
+  static const uptr kMidAppMemBeg = 0;
+  static const uptr kMidAppMemEnd = 0;
+  static const uptr kHiAppMemBeg = 0;
+  static const uptr kHiAppMemEnd = 0;
+  static const uptr kHeapMemBeg = 0;
+  static const uptr kHeapMemEnd = 0;
+  static const uptr kVdsoBeg = 0;
 };
-
-#define TSAN_RUNTIME_VMA 1
-
-#elif SANITIZER_GO && defined(__aarch64__)
 
 /* Go on linux/aarch64 (48-bit VMA) and darwin/aarch64 (47-bit VMA)
 0000 0000 1000 - 0000 1000 0000: executable
@@ -518,22 +501,24 @@ struct Mapping47 {
 6000 0000 0000 - 6200 0000 0000: traces
 6200 0000 0000 - 8000 0000 0000: -
 */
-
-struct Mapping {
+struct MappingGoAarch64 {
   static const uptr kMetaShadowBeg = 0x300000000000ull;
   static const uptr kMetaShadowEnd = 0x400000000000ull;
   static const uptr kTraceMemBeg   = 0x600000000000ull;
   static const uptr kTraceMemEnd   = 0x620000000000ull;
   static const uptr kShadowBeg     = 0x200000000000ull;
   static const uptr kShadowEnd     = 0x300000000000ull;
-  static const uptr kAppMemBeg     = 0x000000001000ull;
-  static const uptr kAppMemEnd     = 0x00e000000000ull;
+  static const uptr kLoAppMemBeg = 0x000000001000ull;
+  static const uptr kLoAppMemEnd = 0x00e000000000ull;
+  static const uptr kMidAppMemBeg = 0;
+  static const uptr kMidAppMemEnd = 0;
+  static const uptr kHiAppMemBeg = 0;
+  static const uptr kHiAppMemEnd = 0;
+  static const uptr kHeapMemBeg = 0;
+  static const uptr kHeapMemEnd = 0;
+  static const uptr kVdsoBeg = 0;
 };
 
-// Indicates the runtime will define the memory regions at runtime.
-#define TSAN_RUNTIME_VMA 1
-
-#elif SANITIZER_GO && defined(__mips64)
 /*
 Go on linux/mips64 (47-bit VMA)
 0000 0000 1000 - 0000 1000 0000: executable
@@ -547,20 +532,24 @@ Go on linux/mips64 (47-bit VMA)
 6000 0000 0000 - 6200 0000 0000: traces
 6200 0000 0000 - 8000 0000 0000: -
 */
-struct Mapping47 {
+struct MappingGoMips64_47 {
   static const uptr kMetaShadowBeg = 0x300000000000ull;
   static const uptr kMetaShadowEnd = 0x400000000000ull;
   static const uptr kTraceMemBeg = 0x600000000000ull;
   static const uptr kTraceMemEnd = 0x620000000000ull;
   static const uptr kShadowBeg = 0x200000000000ull;
   static const uptr kShadowEnd = 0x300000000000ull;
-  static const uptr kAppMemBeg = 0x000000001000ull;
-  static const uptr kAppMemEnd = 0x00e000000000ull;
+  static const uptr kLoAppMemBeg = 0x000000001000ull;
+  static const uptr kLoAppMemEnd = 0x00e000000000ull;
+  static const uptr kMidAppMemBeg = 0;
+  static const uptr kMidAppMemEnd = 0;
+  static const uptr kHiAppMemBeg = 0;
+  static const uptr kHiAppMemEnd = 0;
+  static const uptr kHeapMemBeg = 0;
+  static const uptr kHeapMemEnd = 0;
+  static const uptr kVdsoBeg = 0;
 };
 
-#define TSAN_RUNTIME_VMA 1
-
-#elif SANITIZER_GO && defined(__s390x__)
 /*
 Go on linux/s390x
 0000 0000 1000 - 1000 0000 0000: executable and heap - 16 TiB
@@ -571,40 +560,149 @@ Go on linux/s390x
 9800 0000 0000 - a000 0000 0000: -
 a000 0000 0000 - b000 0000 0000: traces - 16TiB (max history * 128k threads)
 */
-struct Mapping {
+struct MappingGoS390x {
   static const uptr kMetaShadowBeg = 0x900000000000ull;
   static const uptr kMetaShadowEnd = 0x980000000000ull;
   static const uptr kTraceMemBeg   = 0xa00000000000ull;
   static const uptr kTraceMemEnd   = 0xb00000000000ull;
   static const uptr kShadowBeg     = 0x400000000000ull;
   static const uptr kShadowEnd     = 0x800000000000ull;
-  static const uptr kAppMemBeg     = 0x000000001000ull;
-  static const uptr kAppMemEnd     = 0x100000000000ull;
+  static const uptr kLoAppMemBeg = 0x000000001000ull;
+  static const uptr kLoAppMemEnd = 0x100000000000ull;
+  static const uptr kMidAppMemBeg = 0;
+  static const uptr kMidAppMemEnd = 0;
+  static const uptr kHiAppMemBeg = 0;
+  static const uptr kHiAppMemEnd = 0;
+  static const uptr kHeapMemBeg = 0;
+  static const uptr kHeapMemEnd = 0;
+  static const uptr kVdsoBeg = 0;
 };
 
+#if defined(__x86_64__)
+#  define HAS_48_BIT_ADDRESS_SPACE 1
+#elif SANITIZER_IOSSIM  // arm64 iOS simulators (order of #if matters)
+#  define HAS_48_BIT_ADDRESS_SPACE 1
+#elif SANITIZER_IOS  // arm64 iOS devices (order of #if matters)
+#  define HAS_48_BIT_ADDRESS_SPACE 0
+#elif SANITIZER_MAC  // arm64 macOS (order of #if matters)
+#  define HAS_48_BIT_ADDRESS_SPACE 1
 #else
-# error "Unknown platform"
+#  define HAS_48_BIT_ADDRESS_SPACE 0
 #endif
 
+#if !SANITIZER_GO
+
+#  if HAS_48_BIT_ADDRESS_SPACE
+typedef Mapping48AddressSpace Mapping;
+#  elif defined(__mips64)
+typedef MappingMips64_40 Mapping40;
+#    define TSAN_RUNTIME_VMA 1
+#  elif defined(__aarch64__) && defined(__APPLE__)
+typedef MappingAppleAarch64 Mapping;
+#  elif defined(__aarch64__) && !defined(__APPLE__)
+// AArch64 supports multiple VMA which leads to multiple address transformation
+// functions.  To support these multiple VMAS transformations and mappings TSAN
+// runtime for AArch64 uses an external memory read (vmaSize) to select which
+// mapping to use.  Although slower, it make a same instrumented binary run on
+// multiple kernels.
+typedef MappingAarch64_39 Mapping39;
+typedef MappingAarch64_42 Mapping42;
+typedef MappingAarch64_48 Mapping48;
+// Indicates the runtime will define the memory regions at runtime.
+#    define TSAN_RUNTIME_VMA 1
+// Indicates that mapping defines a mid range memory segment.
+#  elif defined(__powerpc64__)
+// PPC64 supports multiple VMA which leads to multiple address transformation
+// functions.  To support these multiple VMAS transformations and mappings TSAN
+// runtime for PPC64 uses an external memory read (vmaSize) to select which
+// mapping to use.  Although slower, it make a same instrumented binary run on
+// multiple kernels.
+typedef MappingPPC64_44 Mapping44;
+typedef MappingPPC64_46 Mapping46;
+typedef MappingPPC64_47 Mapping47;
+// Indicates the runtime will define the memory regions at runtime.
+#    define TSAN_RUNTIME_VMA 1
+#  elif defined(__s390x__)
+typedef MappingS390x Mapping;
+#  endif
+#elif SANITIZER_GO && !SANITIZER_WINDOWS && HAS_48_BIT_ADDRESS_SPACE
+typedef MappingGo48 Mapping;
+#elif SANITIZER_GO && SANITIZER_WINDOWS
+typedef MappingGoWindows Mapping;
+#elif SANITIZER_GO && defined(__powerpc64__)
+/* Only Mapping46 and Mapping47 are currently supported for powercp64 on Go. */
+typedef MappingGoPPC64_46 Mapping46;
+typedef MappingGoPPC64_47 Mapping47;
+#  define TSAN_RUNTIME_VMA 1
+#elif SANITIZER_GO && defined(__aarch64__)
+typedef MappingGoAarch64 Mapping;
+// Indicates the runtime will define the memory regions at runtime.
+#  define TSAN_RUNTIME_VMA 1
+#elif SANITIZER_GO && defined(__mips64)
+typedef MappingGoMips64_47 Mapping47;
+#  define TSAN_RUNTIME_VMA 1
+#elif SANITIZER_GO && defined(__s390x__)
+typedef MappingGoS390x Mapping;
+#else
+#  error "Unknown platform"
+#endif
 
 #ifdef TSAN_RUNTIME_VMA
 extern uptr vmaSize;
 #endif
 
+template <typename Func, typename Arg>
+ALWAYS_INLINE auto SelectMapping(Arg arg) {
+#if defined(__aarch64__) && !defined(__APPLE__) && !SANITIZER_GO
+  switch (vmaSize) {
+    case 39:
+      return Func::template Apply<Mapping39>(arg);
+    case 42:
+      return Func::template Apply<Mapping42>(arg);
+    case 48:
+      return Func::template Apply<Mapping48>(arg);
+  }
+  DCHECK(0);
+  return 0;
+#elif defined(__powerpc64__)
+  switch (vmaSize) {
+#  if !SANITIZER_GO
+    case 44:
+      return Func::template Apply<Mapping44>(arg);
+#  endif
+    case 46:
+      return Func::template Apply<Mapping46>(arg);
+    case 47:
+      return Func::template Apply<Mapping47>(arg);
+  }
+  DCHECK(0);
+  return 0;
+#elif defined(__mips64)
+  switch (vmaSize) {
+#  if !SANITIZER_GO
+    case 40:
+      return Func::template Apply<Mapping40>(arg);
+#  else
+    case 47:
+      return Func::template Apply<Mapping47>(arg);
+#  endif
+  }
+  DCHECK(0);
+  return 0;
+#else
+  return Func::template Apply<Mapping>(arg);
+#endif
+}
 
 enum MappingType {
   MAPPING_LO_APP_BEG,
   MAPPING_LO_APP_END,
   MAPPING_HI_APP_BEG,
   MAPPING_HI_APP_END,
-#ifdef TSAN_MID_APP_RANGE
   MAPPING_MID_APP_BEG,
   MAPPING_MID_APP_END,
-#endif
   MAPPING_HEAP_BEG,
   MAPPING_HEAP_END,
-  MAPPING_APP_BEG,
-  MAPPING_APP_END,
   MAPPING_SHADOW_BEG,
   MAPPING_SHADOW_END,
   MAPPING_META_SHADOW_BEG,
@@ -614,132 +712,68 @@ enum MappingType {
   MAPPING_VDSO_BEG,
 };
 
-template<typename Mapping, int Type>
-uptr MappingImpl(void) {
-  switch (Type) {
-#if !SANITIZER_GO
+struct MappingField {
+  template <typename Mapping>
+  static uptr Apply(MappingType type) {
+    switch (type) {
     case MAPPING_LO_APP_BEG: return Mapping::kLoAppMemBeg;
     case MAPPING_LO_APP_END: return Mapping::kLoAppMemEnd;
-# ifdef TSAN_MID_APP_RANGE
     case MAPPING_MID_APP_BEG: return Mapping::kMidAppMemBeg;
     case MAPPING_MID_APP_END: return Mapping::kMidAppMemEnd;
-# endif
     case MAPPING_HI_APP_BEG: return Mapping::kHiAppMemBeg;
     case MAPPING_HI_APP_END: return Mapping::kHiAppMemEnd;
     case MAPPING_HEAP_BEG: return Mapping::kHeapMemBeg;
     case MAPPING_HEAP_END: return Mapping::kHeapMemEnd;
     case MAPPING_VDSO_BEG: return Mapping::kVdsoBeg;
-#else
-    case MAPPING_APP_BEG: return Mapping::kAppMemBeg;
-    case MAPPING_APP_END: return Mapping::kAppMemEnd;
-#endif
     case MAPPING_SHADOW_BEG: return Mapping::kShadowBeg;
     case MAPPING_SHADOW_END: return Mapping::kShadowEnd;
     case MAPPING_META_SHADOW_BEG: return Mapping::kMetaShadowBeg;
     case MAPPING_META_SHADOW_END: return Mapping::kMetaShadowEnd;
     case MAPPING_TRACE_BEG: return Mapping::kTraceMemBeg;
     case MAPPING_TRACE_END: return Mapping::kTraceMemEnd;
+    }
+    Die();
   }
-}
+};
 
-template<int Type>
-uptr MappingArchImpl(void) {
-#if defined(__aarch64__) && !defined(__APPLE__) && !SANITIZER_GO
-  switch (vmaSize) {
-    case 39: return MappingImpl<Mapping39, Type>();
-    case 42: return MappingImpl<Mapping42, Type>();
-    case 48: return MappingImpl<Mapping48, Type>();
-  }
-  DCHECK(0);
-  return 0;
-#elif defined(__powerpc64__)
-  switch (vmaSize) {
-#if !SANITIZER_GO
-    case 44: return MappingImpl<Mapping44, Type>();
-#endif
-    case 46: return MappingImpl<Mapping46, Type>();
-    case 47: return MappingImpl<Mapping47, Type>();
-  }
-  DCHECK(0);
-  return 0;
-#elif defined(__mips64)
-  switch (vmaSize) {
-#if !SANITIZER_GO
-    case 40: return MappingImpl<Mapping40, Type>();
-#else
-    case 47: return MappingImpl<Mapping47, Type>();
-#endif
-  }
-  DCHECK(0);
-  return 0;
-#else
-  return MappingImpl<Mapping, Type>();
-#endif
-}
-
-#if !SANITIZER_GO
 ALWAYS_INLINE
 uptr LoAppMemBeg(void) {
-  return MappingArchImpl<MAPPING_LO_APP_BEG>();
+  return SelectMapping<MappingField>(MAPPING_LO_APP_BEG);
 }
 ALWAYS_INLINE
 uptr LoAppMemEnd(void) {
-  return MappingArchImpl<MAPPING_LO_APP_END>();
+  return SelectMapping<MappingField>(MAPPING_LO_APP_END);
 }
 
-#ifdef TSAN_MID_APP_RANGE
 ALWAYS_INLINE
 uptr MidAppMemBeg(void) {
-  return MappingArchImpl<MAPPING_MID_APP_BEG>();
+  return SelectMapping<MappingField>(MAPPING_MID_APP_BEG);
 }
 ALWAYS_INLINE
 uptr MidAppMemEnd(void) {
-  return MappingArchImpl<MAPPING_MID_APP_END>();
+  return SelectMapping<MappingField>(MAPPING_MID_APP_END);
 }
-#endif
 
 ALWAYS_INLINE
-uptr HeapMemBeg(void) {
-  return MappingArchImpl<MAPPING_HEAP_BEG>();
-}
+uptr HeapMemBeg(void) { return SelectMapping<MappingField>(MAPPING_HEAP_BEG); }
 ALWAYS_INLINE
-uptr HeapMemEnd(void) {
-  return MappingArchImpl<MAPPING_HEAP_END>();
-}
+uptr HeapMemEnd(void) { return SelectMapping<MappingField>(MAPPING_HEAP_END); }
 
 ALWAYS_INLINE
 uptr HiAppMemBeg(void) {
-  return MappingArchImpl<MAPPING_HI_APP_BEG>();
+  return SelectMapping<MappingField>(MAPPING_HI_APP_BEG);
 }
 ALWAYS_INLINE
 uptr HiAppMemEnd(void) {
-  return MappingArchImpl<MAPPING_HI_APP_END>();
+  return SelectMapping<MappingField>(MAPPING_HI_APP_END);
 }
 
 ALWAYS_INLINE
-uptr VdsoBeg(void) {
-  return MappingArchImpl<MAPPING_VDSO_BEG>();
-}
-
-#else
-
-ALWAYS_INLINE
-uptr AppMemBeg(void) {
-  return MappingArchImpl<MAPPING_APP_BEG>();
-}
-ALWAYS_INLINE
-uptr AppMemEnd(void) {
-  return MappingArchImpl<MAPPING_APP_END>();
-}
-
-#endif
+uptr VdsoBeg(void) { return SelectMapping<MappingField>(MAPPING_VDSO_BEG); }
 
 static inline
 bool GetUserRegion(int i, uptr *start, uptr *end) {
   switch (i) {
-  default:
-    return false;
-#if !SANITIZER_GO
   case 0:
     *start = LoAppMemBeg();
     *end = LoAppMemEnd();
@@ -752,239 +786,105 @@ bool GetUserRegion(int i, uptr *start, uptr *end) {
     *start = HeapMemBeg();
     *end = HeapMemEnd();
     return true;
-# ifdef TSAN_MID_APP_RANGE
   case 3:
-    *start = MidAppMemBeg();
-    *end = MidAppMemEnd();
-    return true;
-# endif
-#else
-  case 0:
-    *start = AppMemBeg();
-    *end = AppMemEnd();
-    return true;
-#endif
+    if (MidAppMemBeg()) {
+      *start = MidAppMemBeg();
+      *end = MidAppMemEnd();
+      return true;
+    }
+    FALLTHROUGH;
+  default:
+    return false;
   }
 }
 
 ALWAYS_INLINE
-uptr ShadowBeg(void) {
-  return MappingArchImpl<MAPPING_SHADOW_BEG>();
-}
+uptr ShadowBeg(void) { return SelectMapping<MappingField>(MAPPING_SHADOW_BEG); }
 ALWAYS_INLINE
-uptr ShadowEnd(void) {
-  return MappingArchImpl<MAPPING_SHADOW_END>();
-}
+uptr ShadowEnd(void) { return SelectMapping<MappingField>(MAPPING_SHADOW_END); }
 
 ALWAYS_INLINE
 uptr MetaShadowBeg(void) {
-  return MappingArchImpl<MAPPING_META_SHADOW_BEG>();
+  return SelectMapping<MappingField>(MAPPING_META_SHADOW_BEG);
 }
 ALWAYS_INLINE
 uptr MetaShadowEnd(void) {
-  return MappingArchImpl<MAPPING_META_SHADOW_END>();
+  return SelectMapping<MappingField>(MAPPING_META_SHADOW_END);
 }
 
 ALWAYS_INLINE
 uptr TraceMemBeg(void) {
-  return MappingArchImpl<MAPPING_TRACE_BEG>();
+  return SelectMapping<MappingField>(MAPPING_TRACE_BEG);
 }
 ALWAYS_INLINE
 uptr TraceMemEnd(void) {
-  return MappingArchImpl<MAPPING_TRACE_END>();
+  return SelectMapping<MappingField>(MAPPING_TRACE_END);
 }
 
-
-template<typename Mapping>
-bool IsAppMemImpl(uptr mem) {
-#if !SANITIZER_GO
+struct IsAppMemImpl {
+  template <typename Mapping>
+  static bool Apply(uptr mem) {
   return (mem >= Mapping::kHeapMemBeg && mem < Mapping::kHeapMemEnd) ||
-# ifdef TSAN_MID_APP_RANGE
          (mem >= Mapping::kMidAppMemBeg && mem < Mapping::kMidAppMemEnd) ||
-# endif
          (mem >= Mapping::kLoAppMemBeg && mem < Mapping::kLoAppMemEnd) ||
          (mem >= Mapping::kHiAppMemBeg && mem < Mapping::kHiAppMemEnd);
-#else
-  return mem >= Mapping::kAppMemBeg && mem < Mapping::kAppMemEnd;
-#endif
-}
+  }
+};
 
 ALWAYS_INLINE
-bool IsAppMem(uptr mem) {
-#if defined(__aarch64__) && !defined(__APPLE__) && !SANITIZER_GO
-  switch (vmaSize) {
-    case 39: return IsAppMemImpl<Mapping39>(mem);
-    case 42: return IsAppMemImpl<Mapping42>(mem);
-    case 48: return IsAppMemImpl<Mapping48>(mem);
-  }
-  DCHECK(0);
-  return false;
-#elif defined(__powerpc64__)
-  switch (vmaSize) {
-#if !SANITIZER_GO
-    case 44: return IsAppMemImpl<Mapping44>(mem);
-#endif
-    case 46: return IsAppMemImpl<Mapping46>(mem);
-    case 47: return IsAppMemImpl<Mapping47>(mem);
-  }
-  DCHECK(0);
-  return false;
-#elif defined(__mips64)
-  switch (vmaSize) {
-#if !SANITIZER_GO
-    case 40: return IsAppMemImpl<Mapping40>(mem);
-#else
-    case 47: return IsAppMemImpl<Mapping47>(mem);
-#endif
-  }
-  DCHECK(0);
-  return false;
-#else
-  return IsAppMemImpl<Mapping>(mem);
-#endif
-}
+bool IsAppMem(uptr mem) { return SelectMapping<IsAppMemImpl>(mem); }
 
-
-template<typename Mapping>
-bool IsShadowMemImpl(uptr mem) {
-  return mem >= Mapping::kShadowBeg && mem <= Mapping::kShadowEnd;
-}
+struct IsShadowMemImpl {
+  template <typename Mapping>
+  static bool Apply(uptr mem) {
+    return mem >= Mapping::kShadowBeg && mem <= Mapping::kShadowEnd;
+  }
+};
 
 ALWAYS_INLINE
 bool IsShadowMem(RawShadow *p) {
-  uptr mem = reinterpret_cast<uptr>(p);
-#if defined(__aarch64__) && !defined(__APPLE__) && !SANITIZER_GO
-  switch (vmaSize) {
-    case 39: return IsShadowMemImpl<Mapping39>(mem);
-    case 42: return IsShadowMemImpl<Mapping42>(mem);
-    case 48: return IsShadowMemImpl<Mapping48>(mem);
-  }
-  DCHECK(0);
-  return false;
-#elif defined(__powerpc64__)
-  switch (vmaSize) {
-#if !SANITIZER_GO
-    case 44: return IsShadowMemImpl<Mapping44>(mem);
-#endif
-    case 46: return IsShadowMemImpl<Mapping46>(mem);
-    case 47: return IsShadowMemImpl<Mapping47>(mem);
-  }
-  DCHECK(0);
-  return false;
-#elif defined(__mips64)
-  switch (vmaSize) {
-#if !SANITIZER_GO
-    case 40: return IsShadowMemImpl<Mapping40>(mem);
-#else
-    case 47: return IsShadowMemImpl<Mapping47>(mem);
-#endif
-  }
-  DCHECK(0);
-  return false;
-#else
-  return IsShadowMemImpl<Mapping>(mem);
-#endif
+  return SelectMapping<IsShadowMemImpl>(reinterpret_cast<uptr>(p));
 }
 
-template<typename Mapping>
-bool IsMetaMemImpl(uptr mem) {
-  return mem >= Mapping::kMetaShadowBeg && mem <= Mapping::kMetaShadowEnd;
-}
+struct IsMetaMemImpl {
+  template <typename Mapping>
+  static bool Apply(uptr mem) {
+    return mem >= Mapping::kMetaShadowBeg && mem <= Mapping::kMetaShadowEnd;
+  }
+};
 
 ALWAYS_INLINE
 bool IsMetaMem(const u32 *p) {
-  uptr mem = reinterpret_cast<uptr>(p);
-#if defined(__aarch64__) && !defined(__APPLE__) && !SANITIZER_GO
-  switch (vmaSize) {
-    case 39: return IsMetaMemImpl<Mapping39>(mem);
-    case 42: return IsMetaMemImpl<Mapping42>(mem);
-    case 48: return IsMetaMemImpl<Mapping48>(mem);
-  }
-  DCHECK(0);
-  return false;
-#elif defined(__powerpc64__)
-  switch (vmaSize) {
-#if !SANITIZER_GO
-    case 44: return IsMetaMemImpl<Mapping44>(mem);
-#endif
-    case 46: return IsMetaMemImpl<Mapping46>(mem);
-    case 47: return IsMetaMemImpl<Mapping47>(mem);
-  }
-  DCHECK(0);
-  return false;
-#elif defined(__mips64)
-  switch (vmaSize) {
-#if !SANITIZER_GO
-    case 40: return IsMetaMemImpl<Mapping40>(mem);
-#else
-    case 47: return IsMetaMemImpl<Mapping47>(mem);
-#endif
-  }
-  DCHECK(0);
-  return false;
-#else
-  return IsMetaMemImpl<Mapping>(mem);
-#endif
+  return SelectMapping<IsMetaMemImpl>(reinterpret_cast<uptr>(p));
 }
 
-template <typename Mapping>
-uptr MemToShadowRaw(uptr x) {
-  DCHECK(IsAppMem(x));
+struct MemToShadowImpl {
+  template <typename Mapping>
+  static uptr Apply(uptr x) {
+    DCHECK(IsAppMemImpl::Apply<Mapping>(x));
 #if !SANITIZER_GO
-  return (((x) & ~(Mapping::kAppMemMsk | (kShadowCell - 1)))
-      ^ Mapping::kAppMemXor) * kShadowCnt;
+    return (((x) & ~(Mapping::kAppMemMsk | (kShadowCell - 1))) ^
+            Mapping::kAppMemXor) *
+           kShadowCnt;
 #else
 # ifndef SANITIZER_WINDOWS
-  return ((x & ~(kShadowCell - 1)) * kShadowCnt) | Mapping::kShadowBeg;
+    return ((x & ~(kShadowCell - 1)) * kShadowCnt) | Mapping::kShadowBeg;
 # else
-  return ((x & ~(kShadowCell - 1)) * kShadowCnt) + Mapping::kShadowBeg;
+    return ((x & ~(kShadowCell - 1)) * kShadowCnt) + Mapping::kShadowBeg;
 # endif
 #endif
-}
-
-template <typename Mapping>
-RawShadow *MemToShadowImpl(uptr x) {
-  return reinterpret_cast<RawShadow *>(MemToShadowRaw<Mapping>(x));
-}
+  }
+};
 
 ALWAYS_INLINE
 RawShadow *MemToShadow(uptr x) {
-#if defined(__aarch64__) && !defined(__APPLE__) && !SANITIZER_GO
-  switch (vmaSize) {
-    case 39: return MemToShadowImpl<Mapping39>(x);
-    case 42: return MemToShadowImpl<Mapping42>(x);
-    case 48: return MemToShadowImpl<Mapping48>(x);
-  }
-  DCHECK(0);
-  return nullptr;
-#elif defined(__powerpc64__)
-  switch (vmaSize) {
-#if !SANITIZER_GO
-    case 44: return MemToShadowImpl<Mapping44>(x);
-#endif
-    case 46: return MemToShadowImpl<Mapping46>(x);
-    case 47: return MemToShadowImpl<Mapping47>(x);
-  }
-  DCHECK(0);
-  return nullptr;
-#elif defined(__mips64)
-  switch (vmaSize) {
-#if !SANITIZER_GO
-    case 40: return MemToShadowImpl<Mapping40>(x);
-#else
-    case 47: return MemToShadowImpl<Mapping47>(x);
-#endif
-  }
-  DCHECK(0);
-  return nullptr;
-#else
-  return MemToShadowImpl<Mapping>(x);
-#endif
+  return reinterpret_cast<RawShadow *>(SelectMapping<MemToShadowImpl>(x));
 }
 
-template<typename Mapping>
-u32 *MemToMetaImpl(uptr x) {
-  DCHECK(IsAppMem(x));
+struct MemToMetaImpl {
+  template <typename Mapping>
+  static u32 *Apply(uptr x) {
+    DCHECK(IsAppMemImpl::Apply<Mapping>(x));
 #if !SANITIZER_GO
   return (u32*)(((((x) & ~(Mapping::kAppMemMsk | (kMetaShadowCell - 1)))) /
       kMetaShadowCell * kMetaShadowSize) | Mapping::kMetaShadowBeg);
@@ -997,47 +897,16 @@ u32 *MemToMetaImpl(uptr x) {
       kMetaShadowCell * kMetaShadowSize) + Mapping::kMetaShadowBeg);
 # endif
 #endif
-}
+  }
+};
 
 ALWAYS_INLINE
-u32 *MemToMeta(uptr x) {
-#if defined(__aarch64__) && !defined(__APPLE__) && !SANITIZER_GO
-  switch (vmaSize) {
-    case 39: return MemToMetaImpl<Mapping39>(x);
-    case 42: return MemToMetaImpl<Mapping42>(x);
-    case 48: return MemToMetaImpl<Mapping48>(x);
-  }
-  DCHECK(0);
-  return 0;
-#elif defined(__powerpc64__)
-  switch (vmaSize) {
-#if !SANITIZER_GO
-    case 44: return MemToMetaImpl<Mapping44>(x);
-#endif
-    case 46: return MemToMetaImpl<Mapping46>(x);
-    case 47: return MemToMetaImpl<Mapping47>(x);
-  }
-  DCHECK(0);
-  return 0;
-#elif defined(__mips64)
-  switch (vmaSize) {
-#if !SANITIZER_GO
-    case 40: return MemToMetaImpl<Mapping40>(x);
-#else
-    case 47: return MemToMetaImpl<Mapping47>(x);
-#endif
-  }
-  DCHECK(0);
-  return 0;
-#else
-  return MemToMetaImpl<Mapping>(x);
-#endif
-}
+u32 *MemToMeta(uptr x) { return SelectMapping<MemToMetaImpl>(x); }
 
-template <typename Mapping>
-uptr ShadowToMemImpl(RawShadow *s) {
-  DCHECK(IsShadowMem(s));
-  uptr sp = reinterpret_cast<uptr>(s);
+struct ShadowToMemImpl {
+  template <typename Mapping>
+  static uptr Apply(uptr sp) {
+    DCHECK(IsShadowMemImpl::Apply<Mapping>(sp));
 #if !SANITIZER_GO
   // The shadow mapping is non-linear and we've lost some bits, so we don't have
   // an easy way to restore the original app address. But the mapping is a
@@ -1046,15 +915,15 @@ uptr ShadowToMemImpl(RawShadow *s) {
   // same address.
   uptr p = (sp / kShadowCnt) ^ Mapping::kAppMemXor;
   if (p >= Mapping::kLoAppMemBeg && p < Mapping::kLoAppMemEnd &&
-      MemToShadow(p) == s)
+      MemToShadowImpl::Apply<Mapping>(p) == sp)
     return p;
-# ifdef TSAN_MID_APP_RANGE
-  p = ((sp / kShadowCnt) ^ Mapping::kAppMemXor) +
-      (Mapping::kMidAppMemBeg & Mapping::kAppMemMsk);
-  if (p >= Mapping::kMidAppMemBeg && p < Mapping::kMidAppMemEnd &&
-      MemToShadow(p) == s)
-    return p;
-# endif
+  if (Mapping::kMidAppMemBeg) {
+    p = ((sp / kShadowCnt) ^ Mapping::kAppMemXor) +
+        (Mapping::kMidAppMemBeg & Mapping::kAppMemMsk);
+    if (p >= Mapping::kMidAppMemBeg && p < Mapping::kMidAppMemEnd &&
+        MemToShadowImpl::Apply<Mapping>(p) == sp)
+      return p;
+  }
   return ((sp / kShadowCnt) ^ Mapping::kAppMemXor) | Mapping::kAppMemMsk;
 #else  // #if !SANITIZER_GO
 # ifndef SANITIZER_WINDOWS
@@ -1063,41 +932,12 @@ uptr ShadowToMemImpl(RawShadow *s) {
   return (sp - Mapping::kShadowBeg) / kShadowCnt;
 # endif // SANITIZER_WINDOWS
 #endif
-}
+  }
+};
 
 ALWAYS_INLINE
 uptr ShadowToMem(RawShadow *s) {
-#if defined(__aarch64__) && !defined(__APPLE__) && !SANITIZER_GO
-  switch (vmaSize) {
-    case 39: return ShadowToMemImpl<Mapping39>(s);
-    case 42: return ShadowToMemImpl<Mapping42>(s);
-    case 48: return ShadowToMemImpl<Mapping48>(s);
-  }
-  DCHECK(0);
-  return 0;
-#elif defined(__powerpc64__)
-  switch (vmaSize) {
-#if !SANITIZER_GO
-    case 44: return ShadowToMemImpl<Mapping44>(s);
-#endif
-    case 46: return ShadowToMemImpl<Mapping46>(s);
-    case 47: return ShadowToMemImpl<Mapping47>(s);
-  }
-  DCHECK(0);
-  return 0;
-#elif defined(__mips64)
-  switch (vmaSize) {
-#if !SANITIZER_GO
-    case 40: return ShadowToMemImpl<Mapping40>(s);
-#else
-    case 47: return ShadowToMemImpl<Mapping47>(s);
-#endif
-  }
-  DCHECK(0);
-  return 0;
-#else
-  return ShadowToMemImpl<Mapping>(s);
-#endif
+  return SelectMapping<ShadowToMemImpl>(reinterpret_cast<uptr>(s));
 }
 
 // The additional page is to catch shadow stack overflow as paging fault.
@@ -1105,90 +945,31 @@ uptr ShadowToMem(RawShadow *s) {
 const uptr kTotalTraceSize = (kTraceSize * sizeof(Event) + sizeof(Trace)
     + (64 << 10) + (64 << 10) - 1) & ~((64 << 10) - 1);
 
-template<typename Mapping>
-uptr GetThreadTraceImpl(int tid) {
-  uptr p = Mapping::kTraceMemBeg + (uptr)tid * kTotalTraceSize;
-  DCHECK_LT(p, Mapping::kTraceMemEnd);
-  return p;
-}
+struct GetThreadTraceImpl {
+  template <typename Mapping>
+  static uptr Apply(uptr tid) {
+    uptr p = Mapping::kTraceMemBeg + tid * kTotalTraceSize;
+    DCHECK_LT(p, Mapping::kTraceMemEnd);
+    return p;
+  }
+};
 
 ALWAYS_INLINE
-uptr GetThreadTrace(int tid) {
-#if defined(__aarch64__) && !defined(__APPLE__) && !SANITIZER_GO
-  switch (vmaSize) {
-    case 39: return GetThreadTraceImpl<Mapping39>(tid);
-    case 42: return GetThreadTraceImpl<Mapping42>(tid);
-    case 48: return GetThreadTraceImpl<Mapping48>(tid);
-  }
-  DCHECK(0);
-  return 0;
-#elif defined(__powerpc64__)
-  switch (vmaSize) {
-#if !SANITIZER_GO
-    case 44: return GetThreadTraceImpl<Mapping44>(tid);
-#endif
-    case 46: return GetThreadTraceImpl<Mapping46>(tid);
-    case 47: return GetThreadTraceImpl<Mapping47>(tid);
-  }
-  DCHECK(0);
-  return 0;
-#elif defined(__mips64)
-  switch (vmaSize) {
-#if !SANITIZER_GO
-    case 40: return GetThreadTraceImpl<Mapping40>(tid);
-#else
-    case 47: return GetThreadTraceImpl<Mapping47>(tid);
-#endif
-  }
-  DCHECK(0);
-  return 0;
-#else
-  return GetThreadTraceImpl<Mapping>(tid);
-#endif
-}
+uptr GetThreadTrace(int tid) { return SelectMapping<GetThreadTraceImpl>(tid); }
 
-
-template<typename Mapping>
-uptr GetThreadTraceHeaderImpl(int tid) {
-  uptr p = Mapping::kTraceMemBeg + (uptr)tid * kTotalTraceSize
-      + kTraceSize * sizeof(Event);
-  DCHECK_LT(p, Mapping::kTraceMemEnd);
-  return p;
-}
+struct GetThreadTraceHeaderImpl {
+  template <typename Mapping>
+  static uptr Apply(uptr tid) {
+    uptr p = Mapping::kTraceMemBeg + tid * kTotalTraceSize +
+             kTraceSize * sizeof(Event);
+    DCHECK_LT(p, Mapping::kTraceMemEnd);
+    return p;
+  }
+};
 
 ALWAYS_INLINE
 uptr GetThreadTraceHeader(int tid) {
-#if defined(__aarch64__) && !defined(__APPLE__) && !SANITIZER_GO
-  switch (vmaSize) {
-    case 39: return GetThreadTraceHeaderImpl<Mapping39>(tid);
-    case 42: return GetThreadTraceHeaderImpl<Mapping42>(tid);
-    case 48: return GetThreadTraceHeaderImpl<Mapping48>(tid);
-  }
-  DCHECK(0);
-  return 0;
-#elif defined(__powerpc64__)
-  switch (vmaSize) {
-#if !SANITIZER_GO
-    case 44: return GetThreadTraceHeaderImpl<Mapping44>(tid);
-#endif
-    case 46: return GetThreadTraceHeaderImpl<Mapping46>(tid);
-    case 47: return GetThreadTraceHeaderImpl<Mapping47>(tid);
-  }
-  DCHECK(0);
-  return 0;
-#elif defined(__mips64)
-  switch (vmaSize) {
-#if !SANITIZER_GO
-    case 40: return GetThreadTraceHeaderImpl<Mapping40>(tid);
-#else
-    case 47: return GetThreadTraceHeaderImpl<Mapping47>(tid);
-#endif
-  }
-  DCHECK(0);
-  return 0;
-#else
-  return GetThreadTraceHeaderImpl<Mapping>(tid);
-#endif
+  return SelectMapping<GetThreadTraceHeaderImpl>(tid);
 }
 
 void InitializePlatform();
