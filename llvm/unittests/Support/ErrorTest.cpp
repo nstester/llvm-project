@@ -957,6 +957,14 @@ TEST(Error, FileErrorTest) {
                 .compare("'file.bin': CustomError {41}\n"
                          "'file2.bin': CustomError {42}"),
             0);
+
+  Error FE5 = createFileError("", make_error<CustomError>(5));
+  EXPECT_EQ(toString(std::move(FE5)).compare("'': CustomError {5}"), 0);
+
+  Error FE6 = createFileError("unused", make_error<CustomError>(6));
+  handleAllErrors(std::move(FE6), [](std::unique_ptr<FileError> F) {
+    EXPECT_EQ(F->messageWithoutFileInfo(), "CustomError {6}");
+  });
 }
 
 enum class test_error_code {
