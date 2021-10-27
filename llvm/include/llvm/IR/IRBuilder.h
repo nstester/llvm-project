@@ -1211,6 +1211,11 @@ private:
 public:
   Value *CreateAdd(Value *LHS, Value *RHS, const Twine &Name = "",
                    bool HasNUW = false, bool HasNSW = false) {
+    if (!isa<Constant>(RHS) && isa<Constant>(LHS))
+      std::swap(LHS, RHS);
+    if (auto RCI = dyn_cast<ConstantInt>(RHS))
+      if (RCI->isZero())
+        return LHS; // LHS + 0 -> LHS
     if (auto *LC = dyn_cast<Constant>(LHS))
       if (auto *RC = dyn_cast<Constant>(RHS))
         return Insert(Folder.CreateAdd(LC, RC, HasNUW, HasNSW), Name);
