@@ -52,9 +52,8 @@ LogicalResult ReductionNode::initialize(ModuleOp parentModule,
 ArrayRef<ReductionNode *> ReductionNode::generateNewVariants() {
   int oldNumVariant = getVariants().size();
 
-  auto createNewNode = [this](std::vector<Range> ranges) {
-    return new (allocator.Allocate())
-        ReductionNode(this, std::move(ranges), allocator);
+  auto createNewNode = [this](const std::vector<Range> &ranges) {
+    return new (allocator.Allocate()) ReductionNode(this, ranges, allocator);
   };
 
   // If we haven't created new variant, then we can create varients by removing

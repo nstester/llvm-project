@@ -1107,13 +1107,12 @@ void PyOperation::erase() {
 // PyOpView
 //------------------------------------------------------------------------------
 
-py::object
-PyOpView::buildGeneric(const py::object &cls, py::list resultTypeList,
-                       py::list operandList,
-                       llvm::Optional<py::dict> attributes,
-                       llvm::Optional<std::vector<PyBlock *>> successors,
-                       llvm::Optional<int> regions,
-                       DefaultingPyLocation location, py::object maybeIp) {
+py::object PyOpView::buildGeneric(
+    const py::object &cls, py::list resultTypeList, py::list operandList,
+    llvm::Optional<py::dict> attributes,
+    llvm::Optional<std::vector<PyBlock *>> successors,
+    llvm::Optional<int> regions, DefaultingPyLocation location,
+    const py::object &maybeIp) {
   PyMlirContextRef context = location->getContext();
   // Class level operation construction metadata.
   std::string name = py::cast<std::string>(cls.attr("OPERATION_NAME"));
@@ -1357,13 +1356,12 @@ PyOpView::buildGeneric(const py::object &cls, py::list resultTypeList,
   }
 
   // Delegate to create.
-  return PyOperation::create(std::move(name),
+  return PyOperation::create(name,
                              /*results=*/std::move(resultTypes),
                              /*operands=*/std::move(operands),
                              /*attributes=*/std::move(attributes),
                              /*successors=*/std::move(successors),
-                             /*regions=*/*regions, location,
-                             std::move(maybeIp));
+                             /*regions=*/*regions, location, maybeIp);
 }
 
 PyOpView::PyOpView(const py::object &operationObject)
@@ -1705,7 +1703,7 @@ void PySymbolTable::walkSymbolTables(PyOperationBase &from,
   if (userData.gotException) {
     std::string message("Exception raised in callback: ");
     message.append(userData.exceptionWhat);
-    throw std::runtime_error(std::move(message));
+    throw std::runtime_error(message);
   }
 }
 
