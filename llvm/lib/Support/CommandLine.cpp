@@ -45,6 +45,7 @@
 #include "llvm/Support/VirtualFileSystem.h"
 #include "llvm/Support/raw_ostream.h"
 #include <cstdlib>
+#include <map>
 #include <string>
 using namespace llvm;
 using namespace cl;
@@ -2338,7 +2339,7 @@ public:
 protected:
   void printOptions(StrOptionPairVector &Opts, size_t MaxArgLen) override {
     std::vector<OptionCategory *> SortedCategories;
-    DenseMap<OptionCategory *, std::vector<Option *>> CategorizedOptions;
+    std::map<OptionCategory *, std::vector<Option *>> CategorizedOptions;
 
     // Collect registered option categories into vector in preparation for
     // sorting.
@@ -2350,15 +2351,17 @@ protected:
     array_pod_sort(SortedCategories.begin(), SortedCategories.end(),
                    OptionCategoryCompare);
 
+    // Create map to empty vectors.
+    for (OptionCategory *Category : SortedCategories)
+      CategorizedOptions[Category] = std::vector<Option *>();
+
     // Walk through pre-sorted options and assign into categories.
     // Because the options are already alphabetically sorted the
     // options within categories will also be alphabetically sorted.
     for (size_t I = 0, E = Opts.size(); I != E; ++I) {
       Option *Opt = Opts[I].second;
       for (auto &Cat : Opt->Categories) {
-        assert(std::binary_search(SortedCategories.begin(),
-                                  SortedCategories.end(), Cat,
-                                  OptionCategoryCompare) &&
+        assert(CategorizedOptions.count(Cat) > 0 &&
                "Option has an unregistered category");
         CategorizedOptions[Cat].push_back(Opt);
       }
