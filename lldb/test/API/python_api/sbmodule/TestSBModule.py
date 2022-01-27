@@ -20,7 +20,7 @@ class SBModuleAPICase(TestBase):
         if self.background_pid:
             os.kill(self.background_pid, signal.SIGKILL)
 
-
+    @skipUnlessDarwin
     def test_module_is_file_backed(self):
         """Test the SBModule::IsFileBacked() method"""
         self.build()
@@ -47,12 +47,12 @@ class SBModuleAPICase(TestBase):
         error = lldb.SBError()
         process = target.AttachToProcessWithID(self.dbg.GetListener(),
                                                self.background_pid, error)
-        self.assertTrue(error.Success(),  PROCESS_IS_VALID)
+        self.assertTrue(error.Success() and process,  PROCESS_IS_VALID)
         main_module = target.GetModuleAtIndex(0)
         self.assertEqual(main_module.GetFileSpec().GetFilename(), "a.out")
         self.assertFalse(main_module.IsFileBacked(),
                          "The module should not be backed by a file on disk.")
 
-        error = process.Detach()
+        error = process.Destroy()
         self.assertTrue(error.Success(), "couldn't destroy process %s" % background_process.pid)
 
