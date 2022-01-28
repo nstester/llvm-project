@@ -560,6 +560,9 @@ Value *WebAssemblyLowerEmscriptenEHSjLj::wrapInvoke(CallBase *CI) {
       NEltArg = NEltArg.getValue() + 1;
     FnAttrs.addAllocSizeAttr(SizeArg, NEltArg);
   }
+  // In case the callee has 'noreturn' attribute, We need to remove it, because
+  // we expect invoke wrappers to return.
+  FnAttrs.removeAttribute(Attribute::NoReturn);
 
   // Reconstruct the AttributesList based on the vector we constructed.
   AttributeList NewCallAL = AttributeList::get(
@@ -1319,6 +1322,9 @@ bool WebAssemblyLowerEmscriptenEHSjLj::runSjLjOnFunction(Function &F) {
     BasicBlock *BB = CB->getParent();
     if (BB->getParent() != &F) // in other function
       continue;
+    if (CB->getOperandBundle(LLVMContext::OB_funclet))
+      report_fatal_error(
+          "setjmp within a catch clause is not supported in Wasm EH");
 
     CallInst *CI = nullptr;
     // setjmp cannot throw. So if it is an invoke, lower it to a call
