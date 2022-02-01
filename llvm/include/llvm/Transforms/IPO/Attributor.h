@@ -132,6 +132,7 @@ struct AbstractAttribute;
 struct InformationCache;
 struct AAIsDead;
 struct AttributorCallGraph;
+struct IRPosition;
 
 class AAResults;
 class Function;
@@ -204,6 +205,16 @@ bool getAssumedUnderlyingObjects(Attributor &A, const Value &Ptr,
 bool getPotentialCopiesOfStoredValue(
     Attributor &A, StoreInst &SI, SmallSetVector<Value *, 4> &PotentialCopies,
     const AbstractAttribute &QueryingAA, bool &UsedAssumedInformation);
+
+/// Return true if \p IRP is readonly. This will query respective AAs that
+/// deduce the information and introduce dependences for \p QueryingAA.
+bool isAssumedReadOnly(Attributor &A, const IRPosition &IRP,
+                       const AbstractAttribute &QueryingAA, bool &IsKnown);
+
+/// Return true if \p IRP is readnone. This will query respective AAs that
+/// deduce the information and introduce dependences for \p QueryingAA.
+bool isAssumedReadNone(Attributor &A, const IRPosition &IRP,
+                       const AbstractAttribute &QueryingAA, bool &IsKnown);
 
 } // namespace AA
 
@@ -337,6 +348,14 @@ struct IRPosition {
     if (auto *CB = dyn_cast<CallBase>(&V))
       return IRPosition::callsite_returned(*CB);
     return IRPosition(const_cast<Value &>(V), IRP_FLOAT, CBContext);
+  }
+
+  /// Create a position describing the instruction \p I. This is different from
+  /// the value version because call sites are treated as intrusctions rather
+  /// than their return value in this function.
+  static const IRPosition inst(const Instruction &I,
+                               const CallBaseContext *CBContext = nullptr) {
+    return IRPosition(const_cast<Instruction &>(I), IRP_FLOAT, CBContext);
   }
 
   /// Create a position describing the function scope of \p F.
@@ -667,7 +686,7 @@ private:
       break;
     case IRPosition::IRP_FLOAT:
       // Special case for floating functions.
-      if (isa<Function>(AnchorVal))
+      if (isa<Function>(AnchorVal) || isa<CallBase>(AnchorVal))
         Enc = {&AnchorVal, ENC_FLOATING_FUNCTION};
       else
         Enc = {&AnchorVal, ENC_VALUE};
@@ -4744,6 +4763,15 @@ struct AAPointerInfo : public AbstractAttribute {
       LoadInst &LI, function_ref<bool(const Access &, bool)> CB) const = 0;
   virtual bool forallInterferingAccesses(
       StoreInst &SI, function_ref<bool(const Access &, bool)> CB) const = 0;
+
+  /// Call \p CB on all write accesses that might interfere with \p LI and
+  /// return true if all such accesses were known and the callback returned true
+  /// for all of them, false otherwise. In contrast to forallInterferingAccesses
+  /// this function will perform reasoning to exclude write accesses that cannot
+  /// affect the load even if they on the surface look as if they would.
+  virtual bool forallInterferingWrites(
+      Attributor &A, const AbstractAttribute &QueryingAA, LoadInst &LI,
+      function_ref<bool(const Access &, bool)> CB) const = 0;
 
   /// This function should return true if the type of the \p AA is AAPointerInfo
   static bool classof(const AbstractAttribute *AA) {

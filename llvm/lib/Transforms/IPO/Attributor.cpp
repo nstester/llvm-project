@@ -395,6 +395,47 @@ bool AA::getPotentialCopiesOfStoredValue(
   return true;
 }
 
+static bool isAssumedReadOnlyOrReadNone(Attributor &A, const IRPosition &IRP,
+                                        const AbstractAttribute &QueryingAA,
+                                        bool RequireReadNone, bool &IsKnown) {
+
+  IRPosition::Kind Kind = IRP.getPositionKind();
+  if (Kind == IRPosition::IRP_FUNCTION || Kind == IRPosition::IRP_CALL_SITE) {
+    const auto &MemLocAA =
+        A.getAAFor<AAMemoryLocation>(QueryingAA, IRP, DepClassTy::NONE);
+    if (MemLocAA.isAssumedReadNone()) {
+      IsKnown = MemLocAA.isKnownReadNone();
+      if (!IsKnown)
+        A.recordDependence(MemLocAA, QueryingAA, DepClassTy::OPTIONAL);
+      return true;
+    }
+  }
+
+  const auto &MemBehaviorAA =
+      A.getAAFor<AAMemoryBehavior>(QueryingAA, IRP, DepClassTy::NONE);
+  if (MemBehaviorAA.isAssumedReadNone() ||
+      (!RequireReadNone && MemBehaviorAA.isAssumedReadOnly())) {
+    IsKnown = RequireReadNone ? MemBehaviorAA.isKnownReadNone()
+                              : MemBehaviorAA.isKnownReadOnly();
+    if (!IsKnown)
+      A.recordDependence(MemBehaviorAA, QueryingAA, DepClassTy::OPTIONAL);
+    return true;
+  }
+
+  return false;
+}
+
+bool AA::isAssumedReadOnly(Attributor &A, const IRPosition &IRP,
+                           const AbstractAttribute &QueryingAA, bool &IsKnown) {
+  return isAssumedReadOnlyOrReadNone(A, IRP, QueryingAA,
+                                     /* RequireReadNone */ false, IsKnown);
+}
+bool AA::isAssumedReadNone(Attributor &A, const IRPosition &IRP,
+                           const AbstractAttribute &QueryingAA, bool &IsKnown) {
+  return isAssumedReadOnlyOrReadNone(A, IRP, QueryingAA,
+                                     /* RequireReadNone */ true, IsKnown);
+}
+
 /// Return true if \p New is equal or worse than \p Old.
 static bool isEqualOrWorse(const Attribute &New, const Attribute &Old) {
   if (!Old.isIntAttribute())
@@ -925,7 +966,7 @@ bool Attributor::isAssumedDead(const Use &U,
                          UsedAssumedInformation, CheckBBLivenessOnly, DepClass);
   }
 
-  return isAssumedDead(IRPosition::value(*UserI), QueryingAA, FnLivenessAA,
+  return isAssumedDead(IRPosition::inst(*UserI), QueryingAA, FnLivenessAA,
                        UsedAssumedInformation, CheckBBLivenessOnly, DepClass);
 }
 
@@ -948,7 +989,8 @@ bool Attributor::isAssumedDead(const Instruction &I,
   // If we have a context instruction and a liveness AA we use it.
   if (FnLivenessAA &&
       FnLivenessAA->getIRPosition().getAnchorScope() == I.getFunction() &&
-      FnLivenessAA->isAssumedDead(&I)) {
+      (CheckBBLivenessOnly ? FnLivenessAA->isAssumedDead(I.getParent())
+                           : FnLivenessAA->isAssumedDead(&I))) {
     if (QueryingAA)
       recordDependence(*FnLivenessAA, *QueryingAA, DepClass);
     if (!FnLivenessAA->isKnownDead(&I))
@@ -959,8 +1001,9 @@ bool Attributor::isAssumedDead(const Instruction &I,
   if (CheckBBLivenessOnly)
     return false;
 
-  const AAIsDead &IsDeadAA = getOrCreateAAFor<AAIsDead>(
-      IRPosition::value(I, CBCtx), QueryingAA, DepClassTy::NONE);
+  const IRPosition IRP = IRPosition::inst(I, CBCtx);
+  const AAIsDead &IsDeadAA =
+      getOrCreateAAFor<AAIsDead>(IRP, QueryingAA, DepClassTy::NONE);
   // Don't check liveness for AAIsDead.
   if (QueryingAA == &IsDeadAA)
     return false;
@@ -1060,8 +1103,14 @@ bool Attributor::checkForAllUses(
     const Use *U = Worklist.pop_back_val();
     if (isa<PHINode>(U->getUser()) && !Visited.insert(U).second)
       continue;
-    LLVM_DEBUG(dbgs() << "[Attributor] Check use: " << **U << " in "
-                      << *U->getUser() << "\n");
+    LLVM_DEBUG({
+      if (auto *Fn = dyn_cast<Function>(U->getUser()))
+        dbgs() << "[Attributor] Check use: " << **U << " in " << Fn->getName()
+               << "\n";
+      else
+        dbgs() << "[Attributor] Check use: " << **U << " in " << *U->getUser()
+               << "\n";
+    });
     bool UsedAssumedInformation = false;
     if (isAssumedDead(*U, &QueryingAA, LivenessAA, UsedAssumedInformation,
                       CheckBBLivenessOnly, LivenessDepClass)) {
@@ -1151,8 +1200,14 @@ bool Attributor::checkForAllCallSites(function_ref<bool(AbstractCallSite)> Pred,
   SmallVector<const Use *, 8> Uses(make_pointer_range(Fn.uses()));
   for (unsigned u = 0; u < Uses.size(); ++u) {
     const Use &U = *Uses[u];
-    LLVM_DEBUG(dbgs() << "[Attributor] Check use: " << *U << " in "
-                      << *U.getUser() << "\n");
+    LLVM_DEBUG({
+      if (auto *Fn = dyn_cast<Function>(U))
+        dbgs() << "[Attributor] Check use: " << Fn->getName() << " in "
+               << *U.getUser() << "\n";
+      else
+        dbgs() << "[Attributor] Check use: " << *U << " in " << *U.getUser()
+               << "\n";
+    });
     bool UsedAssumedInformation = false;
     if (isAssumedDead(U, QueryingAA, nullptr, UsedAssumedInformation,
                       /* CheckBBLivenessOnly */ true)) {
@@ -1293,9 +1348,12 @@ static bool checkForAllInstructionsImpl(
     for (Instruction *I : *Insts) {
       // Skip dead instructions.
       if (A && !CheckPotentiallyDead &&
-          A->isAssumedDead(IRPosition::value(*I), QueryingAA, LivenessAA,
-                           UsedAssumedInformation, CheckBBLivenessOnly))
+          A->isAssumedDead(IRPosition::inst(*I), QueryingAA, LivenessAA,
+                           UsedAssumedInformation, CheckBBLivenessOnly)) {
+        LLVM_DEBUG(dbgs() << "[Attributor] Instruction " << *I
+                          << " is potentially dead, skip!\n";);
         continue;
+      }
 
       if (!Pred(*I))
         return false;
@@ -1354,7 +1412,7 @@ bool Attributor::checkForAllReadWriteInstructions(
   for (Instruction *I :
        InfoCache.getReadOrWriteInstsForFunction(*AssociatedFunction)) {
     // Skip dead instructions.
-    if (isAssumedDead(IRPosition::value(*I), &QueryingAA, &LivenessAA,
+    if (isAssumedDead(IRPosition::inst(*I), &QueryingAA, &LivenessAA,
                       UsedAssumedInformation))
       continue;
 
@@ -2626,12 +2684,12 @@ void Attributor::identifyDefaultAbstractAttributes(Function &F) {
 
   auto CallSitePred = [&](Instruction &I) -> bool {
     auto &CB = cast<CallBase>(I);
-    IRPosition CBRetPos = IRPosition::callsite_returned(CB);
+    IRPosition CBInstPos = IRPosition::inst(CB);
     IRPosition CBFnPos = IRPosition::callsite_function(CB);
 
     // Call sites might be dead if they do not have side effects and no live
     // users. The return value might be dead if there are no live users.
-    getOrCreateAAFor<AAIsDead>(CBRetPos);
+    getOrCreateAAFor<AAIsDead>(CBInstPos);
 
     Function *Callee = CB.getCalledFunction();
     // TODO: Even if the callee is not known now we might be able to simplify

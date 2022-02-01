@@ -15,6 +15,7 @@
 
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/SCCIterator.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SetOperations.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/Statistic.h"
@@ -67,6 +68,12 @@ static cl::opt<unsigned, true> MaxPotentialValues(
              "tracked for each position."),
     cl::location(llvm::PotentialConstantIntValuesState::MaxPotentialValues),
     cl::init(7));
+
+static cl::opt<unsigned>
+    MaxInterferingWrites("attributor-max-interfering-writes", cl::Hidden,
+                         cl::desc("Maximum number of interfering writes to "
+                                  "check before assuming all might interfere."),
+                         cl::init(6));
 
 STATISTIC(NumAAs, "Number of abstract attributes created");
 
@@ -281,8 +288,11 @@ static bool genericValueTraversal(
       continue;
 
     // Make sure we limit the compile time for complex expressions.
-    if (Iteration++ >= MaxValues)
+    if (Iteration++ >= MaxValues) {
+      LLVM_DEBUG(dbgs() << "Generic value traversal reached iteration limit: "
+                        << Iteration << "!\n");
       return false;
+    }
 
     // Explicitly look through calls with a "returned" attribute if we do
     // not have a pointer as stripPointerCasts only works on them.
@@ -331,10 +341,7 @@ static bool genericValueTraversal(
              "Expected liveness in the presence of instructions!");
       for (unsigned u = 0, e = PHI->getNumIncomingValues(); u < e; u++) {
         BasicBlock *IncomingBB = PHI->getIncomingBlock(u);
-        bool UsedAssumedInformation = false;
-        if (A.isAssumedDead(*IncomingBB->getTerminator(), &QueryingAA,
-                            LivenessAA, UsedAssumedInformation,
-                            /* CheckBBLivenessOnly */ true)) {
+        if (LivenessAA->isEdgeDead(IncomingBB, PHI->getParent())) {
           AnyDead = true;
           continue;
         }
@@ -360,8 +367,11 @@ static bool genericValueTraversal(
     }
 
     // Once a leaf is reached we inform the user through the callback.
-    if (!VisitValueCB(*V, CtxI, State, Iteration > 1))
+    if (!VisitValueCB(*V, CtxI, State, Iteration > 1)) {
+      LLVM_DEBUG(dbgs() << "Generic value traversal visit callback failed for: "
+                        << *V << "!\n");
       return false;
+    }
   } while (!Worklist.empty());
 
   // If we actually used liveness information so we have to record a dependence.
@@ -1057,6 +1067,120 @@ struct AAPointerInfoImpl
       const override {
     return State::forallInterferingAccesses(SI, CB);
   }
+  bool forallInterferingWrites(
+      Attributor &A, const AbstractAttribute &QueryingAA, LoadInst &LI,
+      function_ref<bool(const Access &, bool)> UserCB) const override {
+    SmallPtrSet<const Access *, 8> DominatingWrites;
+    SmallVector<std::pair<const Access *, bool>, 8> InterferingWrites;
+
+    Function &Scope = *LI.getFunction();
+    const auto &NoSyncAA = A.getAAFor<AANoSync>(
+        QueryingAA, IRPosition::function(Scope), DepClassTy::OPTIONAL);
+    const auto *ExecDomainAA = A.lookupAAFor<AAExecutionDomain>(
+        IRPosition::function(Scope), &QueryingAA, DepClassTy::OPTIONAL);
+    const bool NoSync = NoSyncAA.isAssumedNoSync();
+
+    // Helper to determine if we need to consider threading, which we cannot
+    // right now. However, if the function is (assumed) nosync or the thread
+    // executing all instructions is the main thread only we can ignore
+    // threading.
+    auto CanIgnoreThreading = [&](const Instruction &I) -> bool {
+      if (NoSync)
+        return true;
+      if (ExecDomainAA && ExecDomainAA->isExecutedByInitialThreadOnly(I))
+        return true;
+      return false;
+    };
+
+    // Helper to determine if the access is executed by the same thread as the
+    // load, for now it is sufficient to avoid any potential threading effects
+    // as we cannot deal with them anyway.
+    auto IsSameThreadAsLoad = [&](const Access &Acc) -> bool {
+      return CanIgnoreThreading(*Acc.getLocalInst());
+    };
+
+    // TODO: Use inter-procedural reachability and dominance.
+    const auto &NoRecurseAA = A.getAAFor<AANoRecurse>(
+        QueryingAA, IRPosition::function(*LI.getFunction()),
+        DepClassTy::OPTIONAL);
+
+    // Helper to determine if the instruction may reach the load.
+    auto IsReachableFrom = [&](const Instruction &I) {
+      const auto &ReachabilityAA = A.getAAFor<AAReachability>(
+          QueryingAA, IRPosition::function(*I.getFunction()),
+          DepClassTy::OPTIONAL);
+      return ReachabilityAA.isAssumedReachable(A, I, LI);
+    };
+
+    const bool CanUseCFGResoning =
+        NoRecurseAA.isKnownNoRecurse() && CanIgnoreThreading(LI);
+    InformationCache &InfoCache = A.getInfoCache();
+    const DominatorTree *DT =
+        InfoCache.getAnalysisResultForFunction<DominatorTreeAnalysis>(Scope);
+
+    auto AccessCB = [&](const Access &Acc, bool Exact) {
+      if (!Acc.isWrite())
+        return true;
+
+      // For now we only filter accesses based on CFG reasoning which does not
+      // work yet if we have threading effects, or the access is complicated.
+      if (CanUseCFGResoning) {
+        if (!IsReachableFrom(*Acc.getLocalInst()))
+          return true;
+        if (DT && Exact &&
+            (Acc.getLocalInst()->getFunction() == LI.getFunction()) &&
+            IsSameThreadAsLoad(Acc)) {
+          if (DT->dominates(Acc.getLocalInst(), &LI))
+            DominatingWrites.insert(&Acc);
+        }
+      }
+
+      InterferingWrites.push_back({&Acc, Exact});
+      return true;
+    };
+    if (!State::forallInterferingAccesses(LI, AccessCB))
+      return false;
+
+    // If we cannot use CFG reasoning we only filter the non-write accesses
+    // and are done here.
+    if (!CanUseCFGResoning) {
+      for (auto &It : InterferingWrites)
+        if (!UserCB(*It.first, It.second))
+          return false;
+      return true;
+    }
+
+    // Helper to determine if we can skip a specific write access. This is in
+    // the worst case quadratic as we are looking for another write that will
+    // hide the effect of this one.
+    auto CanSkipAccess = [&](const Access &Acc, bool Exact) {
+      if (!IsSameThreadAsLoad(Acc))
+        return false;
+      if (!DominatingWrites.count(&Acc))
+        return false;
+      for (const Access *DomAcc : DominatingWrites) {
+        assert(Acc.getLocalInst()->getFunction() ==
+                   DomAcc->getLocalInst()->getFunction() &&
+               "Expected dominating writes to be in the same function!");
+
+        if (DomAcc != &Acc &&
+            DT->dominates(Acc.getLocalInst(), DomAcc->getLocalInst())) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    // Run the user callback on all writes we cannot skip and return if that
+    // succeeded for all or not.
+    unsigned NumInterferingWrites = InterferingWrites.size();
+    for (auto &It : InterferingWrites)
+      if (!DT || NumInterferingWrites > MaxInterferingWrites ||
+          !CanSkipAccess(*It.first, It.second))
+        if (!UserCB(*It.first, It.second))
+          return false;
+    return true;
+  }
 
   ChangeStatus translateAndAddCalleeState(Attributor &A,
                                           const AAPointerInfo &CalleeAA,
@@ -1199,9 +1323,8 @@ struct AAPointerInfoFloating : public AAPointerInfoImpl {
                             << " : " << *Idx << "\n");
           return false;
         }
-        UsrOI.Offset = PtrOI.Offset +
-                       DL.getIndexedOffsetInType(
-                           GEP->getSourceElementType(), Indices);
+        UsrOI.Offset = PtrOI.Offset + DL.getIndexedOffsetInType(
+                                          GEP->getSourceElementType(), Indices);
         Follow = true;
         return true;
       }
@@ -2772,16 +2895,10 @@ struct AAWillReturnImpl : public AAWillReturn {
         (!getAssociatedFunction() || !getAssociatedFunction()->mustProgress()))
       return false;
 
-    const auto &MemAA =
-        A.getAAFor<AAMemoryBehavior>(*this, getIRPosition(), DepClassTy::NONE);
-    if (!MemAA.isAssumedReadOnly())
-      return false;
-    if (KnownOnly && !MemAA.isKnownReadOnly())
-      return false;
-    if (!MemAA.isKnownReadOnly())
-      A.recordDependence(MemAA, *this, DepClassTy::OPTIONAL);
-
-    return true;
+    bool IsKnown;
+    if (AA::isAssumedReadOnly(A, getIRPosition(), *this, IsKnown))
+      return IsKnown || !KnownOnly;
+    return false;
   }
 
   /// See AbstractAttribute::updateImpl(...).
@@ -2878,6 +2995,10 @@ struct AAReachabilityImpl : AAReachability {
 
   /// See AbstractAttribute::updateImpl(...).
   ChangeStatus updateImpl(Attributor &A) override {
+    const auto &NoRecurseAA = A.getAAFor<AANoRecurse>(
+        *this, IRPosition::function(*getAnchorScope()), DepClassTy::REQUIRED);
+    if (!NoRecurseAA.isAssumedNoRecurse())
+      return indicatePessimisticFixpoint();
     return ChangeStatus::UNCHANGED;
   }
 };
@@ -2982,9 +3103,8 @@ struct AANoAliasArgument final
       return Base::updateImpl(A);
 
     // If the argument is read-only, no-alias cannot break synchronization.
-    const auto &MemBehaviorAA = A.getAAFor<AAMemoryBehavior>(
-        *this, getIRPosition(), DepClassTy::OPTIONAL);
-    if (MemBehaviorAA.isAssumedReadOnly())
+    bool IsKnown;
+    if (AA::isAssumedReadOnly(A, getIRPosition(), *this, IsKnown))
       return Base::updateImpl(A);
 
     // If the argument is never passed through callbacks, no-alias cannot break
@@ -3340,14 +3460,8 @@ struct AAIsDeadValueImpl : public AAIsDead {
     if (!NoUnwindAA.isKnownNoUnwind())
       A.recordDependence(NoUnwindAA, *this, DepClassTy::OPTIONAL);
 
-    const auto &MemBehaviorAA =
-        A.getAndUpdateAAFor<AAMemoryBehavior>(*this, CallIRP, DepClassTy::NONE);
-    if (MemBehaviorAA.isAssumedReadOnly()) {
-      if (!MemBehaviorAA.isKnownReadOnly())
-        A.recordDependence(MemBehaviorAA, *this, DepClassTy::OPTIONAL);
-      return true;
-    }
-    return false;
+    bool IsKnown;
+    return AA::isAssumedReadOnly(A, CallIRP, *this, IsKnown);
   }
 };
 
@@ -3673,6 +3787,7 @@ struct AAIsDeadFunction : public AAIsDead {
       if (!AssumedLiveBlocks.count(&BB)) {
         A.deleteAfterManifest(BB);
         ++BUILD_STAT_NAME(AAIsDead, BasicBlock);
+        HasChanged = ChangeStatus::CHANGED;
       }
 
     return HasChanged;
@@ -3682,7 +3797,7 @@ struct AAIsDeadFunction : public AAIsDead {
   ChangeStatus updateImpl(Attributor &A) override;
 
   bool isEdgeDead(const BasicBlock *From, const BasicBlock *To) const override {
-    return !AssumedLiveEdges.count(std::make_pair(From, To));
+    return isValidState() && !AssumedLiveEdges.count(std::make_pair(From, To));
   }
 
   /// See AbstractAttribute::trackStatistics()
@@ -4895,14 +5010,11 @@ ChangeStatus AANoCaptureImpl::updateImpl(Attributor &A) {
   AANoCapture::StateType T;
 
   // Readonly means we cannot capture through memory.
-  const auto &FnMemAA =
-      A.getAAFor<AAMemoryBehavior>(*this, FnPos, DepClassTy::NONE);
-  if (FnMemAA.isAssumedReadOnly()) {
+  bool IsKnown;
+  if (AA::isAssumedReadOnly(A, FnPos, *this, IsKnown)) {
     T.addKnownBits(NOT_CAPTURED_IN_MEM);
-    if (FnMemAA.isKnownReadOnly())
+    if (IsKnown)
       addKnownBits(NOT_CAPTURED_IN_MEM);
-    else
-      A.recordDependence(FnMemAA, *this, DepClassTy::OPTIONAL);
   }
 
   // Make sure all returned values are different than the underlying value.
@@ -5238,8 +5350,6 @@ struct AAValueSimplifyImpl : AAValueSimplify {
 
       auto CheckAccess = [&](const AAPointerInfo::Access &Acc, bool IsExact) {
         LLVM_DEBUG(dbgs() << " - visit access " << Acc << "\n");
-        if (!Acc.isWrite())
-          return true;
         if (Acc.isWrittenValueYetUndetermined())
           return true;
         Value *Content = Acc.getWrittenValue();
@@ -5259,7 +5369,7 @@ struct AAValueSimplifyImpl : AAValueSimplify {
 
       auto &PI = A.getAAFor<AAPointerInfo>(AA, IRPosition::value(*Obj),
                                            DepClassTy::REQUIRED);
-      if (!PI.forallInterferingAccesses(L, CheckAccess))
+      if (!PI.forallInterferingWrites(A, AA, L, CheckAccess))
         return false;
     }
     return true;
@@ -5297,9 +5407,8 @@ struct AAValueSimplifyArgument final : AAValueSimplifyImpl {
     if (Arg->hasByValAttr()) {
       // TODO: We probably need to verify synchronization is not an issue, e.g.,
       //       there is no race by not copying a constant byval.
-      const auto &MemAA = A.getAAFor<AAMemoryBehavior>(*this, getIRPosition(),
-                                                       DepClassTy::REQUIRED);
-      if (!MemAA.isAssumedReadOnly())
+      bool IsKnown;
+      if (!AA::isAssumedReadOnly(A, getIRPosition(), *this, IsKnown))
         return indicatePessimisticFixpoint();
     }
 
@@ -6799,9 +6908,8 @@ struct AAPrivatizablePtrCallSiteArgument final
       return indicatePessimisticFixpoint();
     }
 
-    const auto &MemBehaviorAA =
-        A.getAAFor<AAMemoryBehavior>(*this, IRP, DepClassTy::REQUIRED);
-    if (!MemBehaviorAA.isAssumedReadOnly()) {
+    bool IsKnown;
+    if (!AA::isAssumedReadOnly(A, IRP, *this, IsKnown)) {
       LLVM_DEBUG(dbgs() << "[AAPrivatizablePtr] pointer is written!\n");
       return indicatePessimisticFixpoint();
     }
