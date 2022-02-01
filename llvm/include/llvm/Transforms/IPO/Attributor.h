@@ -191,7 +191,8 @@ Constant *getInitialValueForObj(Value &Obj, Type &Ty,
 bool getAssumedUnderlyingObjects(Attributor &A, const Value &Ptr,
                                  SmallVectorImpl<Value *> &Objects,
                                  const AbstractAttribute &QueryingAA,
-                                 const Instruction *CtxI);
+                                 const Instruction *CtxI,
+                                 bool Intraprocedural = false);
 
 /// Collect all potential values of the one stored by \p SI into
 /// \p PotentialCopies. That is, the only copies that were made via the
@@ -215,6 +216,24 @@ bool isAssumedReadOnly(Attributor &A, const IRPosition &IRP,
 /// deduce the information and introduce dependences for \p QueryingAA.
 bool isAssumedReadNone(Attributor &A, const IRPosition &IRP,
                        const AbstractAttribute &QueryingAA, bool &IsKnown);
+
+/// Return true if \p ToI is potentially reachable from \p FromI. The two
+/// instructions do not need to be in the same function. \p GoBackwardsCB
+/// can be provided to convey domain knowledge about the "lifespan" the user is
+/// interested in. By default, the callers of \p FromI are checked as well to
+/// determine if \p ToI can be reached. If the query is not interested in
+/// callers beyond a certain point, e.g., a GPU kernel entry or the function
+/// containing an alloca, the \p GoBackwardsCB should return false.
+bool isPotentiallyReachable(
+    Attributor &A, const Instruction &FromI, const Instruction &ToI,
+    const AbstractAttribute &QueryingAA,
+    std::function<bool(const Function &F)> GoBackwardsCB = nullptr);
+
+/// Same as above but it is sufficient to reach any instruction in \p ToFn.
+bool isPotentiallyReachable(
+    Attributor &A, const Instruction &FromI, const Function &ToFn,
+    const AbstractAttribute &QueryingAA,
+    std::function<bool(const Function &F)> GoBackwardsCB);
 
 } // namespace AA
 
@@ -903,7 +922,7 @@ struct InformationCache {
             [&](const Function &F) {
               return AG.getAnalysis<PostDominatorTreeAnalysis>(F);
             }),
-        AG(AG), CGSCC(CGSCC), TargetTriple(M.getTargetTriple()) {
+        AG(AG), TargetTriple(M.getTargetTriple()) {
     if (CGSCC)
       initializeModuleSlice(*CGSCC);
   }
@@ -1020,13 +1039,6 @@ struct InformationCache {
     return AG.getAnalysis<AP>(F);
   }
 
-  /// Return SCC size on call graph for function \p F or 0 if unknown.
-  unsigned getSccSize(const Function &F) {
-    if (CGSCC && CGSCC->count(const_cast<Function *>(&F)))
-      return CGSCC->size();
-    return 0;
-  }
-
   /// Return datalayout used in the module.
   const DataLayout &getDL() { return DL; }
 
@@ -1115,9 +1127,6 @@ private:
 
   /// Getters for analysis.
   AnalysisGetter &AG;
-
-  /// The underlying CGSCC, or null if not available.
-  SetVector<Function *> *CGSCC;
 
   /// Set of inlineable functions
   SmallPtrSet<const Function *, 8> InlineableFunctions;
@@ -1385,6 +1394,9 @@ struct Attributor {
       return nullptr;
     return AA;
   }
+
+  /// Allows a query AA to request an update if a new query was received.
+  void registerForUpdate(AbstractAttribute &AA);
 
   /// Explicitly record a dependence from \p FromAA to \p ToAA, that is if
   /// \p FromAA changes \p ToAA should be updated as well.
@@ -1818,6 +1830,18 @@ public:
                             const AbstractAttribute &QueryingAA,
                             bool RequireAllCallSites, bool &AllCallSitesKnown);
 
+  /// Check \p Pred on all call sites of \p Fn.
+  ///
+  /// This method will evaluate \p Pred on call sites and return
+  /// true if \p Pred holds in every call sites. However, this is only possible
+  /// all call sites are known, hence the function has internal linkage.
+  /// If true is returned, \p AllCallSitesKnown is set if all possible call
+  /// sites of the function have been visited.
+  bool checkForAllCallSites(function_ref<bool(AbstractCallSite)> Pred,
+                            const Function &Fn, bool RequireAllCallSites,
+                            const AbstractAttribute *QueryingAA,
+                            bool &AllCallSitesKnown);
+
   /// Check \p Pred on all values potentially returned by \p F.
   ///
   /// This method will evaluate \p Pred on all values potentially returned by
@@ -1956,18 +1980,6 @@ private:
   /// may trigger further updates. (\see DependenceStack)
   void rememberDependences();
 
-  /// Check \p Pred on all call sites of \p Fn.
-  ///
-  /// This method will evaluate \p Pred on call sites and return
-  /// true if \p Pred holds in every call sites. However, this is only possible
-  /// all call sites are known, hence the function has internal linkage.
-  /// If true is returned, \p AllCallSitesKnown is set if all possible call
-  /// sites of the function have been visited.
-  bool checkForAllCallSites(function_ref<bool(AbstractCallSite)> Pred,
-                            const Function &Fn, bool RequireAllCallSites,
-                            const AbstractAttribute *QueryingAA,
-                            bool &AllCallSitesKnown);
-
   /// Determine if CallBase context in \p IRP should be propagated.
   bool shouldPropagateCallBaseContext(const IRPosition &IRP);
 
@@ -2079,6 +2091,10 @@ private:
 
   /// Callback to get an OptimizationRemarkEmitter from a Function *.
   Optional<OptimizationRemarkGetter> OREGetter;
+
+  /// Container with all the query AAs that requested an update via
+  /// registerForUpdate.
+  SmallSetVector<AbstractAttribute *, 16> QueryAAsAwaitingUpdate;
 
   /// The name of the pass to emit remarks for.
   const char *PassName = "";
@@ -2816,6 +2832,14 @@ struct AbstractAttribute : public IRPosition, public AADepGraphNode {
   ///    a subset of the IR, or attributes in-flight, that have to be looked at
   ///    in the `updateImpl` method.
   virtual void initialize(Attributor &A) {}
+
+  /// A query AA is always scheduled as long as we do updates because it does
+  /// lazy computation that cannot be determined to be done from the outside.
+  /// However, while query AAs will not be fixed if they do not have outstanding
+  /// dependences, we will only schedule them like other AAs. If a query AA that
+  /// received a new query it needs to request an update via
+  /// `Attributor::requestUpdateForAA`.
+  virtual bool isQueryAA() const { return false; }
 
   /// Return the internal abstract state for inspection.
   virtual StateType &getState() = 0;
@@ -4624,18 +4648,30 @@ struct AAFunctionReachability
 
   AAFunctionReachability(const IRPosition &IRP, Attributor &A) : Base(IRP) {}
 
-  /// If the function represented by this possition can reach \p Fn.
-  virtual bool canReach(Attributor &A, Function *Fn) const = 0;
+  /// See AbstractAttribute::isQueryAA.
+  bool isQueryAA() const override { return true; }
 
-  /// Can \p CB reach \p Fn
-  virtual bool canReach(Attributor &A, CallBase &CB, Function *Fn) const = 0;
+  /// If the function represented by this possition can reach \p Fn.
+  virtual bool canReach(Attributor &A, const Function &Fn) const = 0;
+
+  /// Can \p CB reach \p Fn.
+  virtual bool canReach(Attributor &A, CallBase &CB,
+                        const Function &Fn) const = 0;
+
+  /// Can  \p Inst reach \p Fn.
+  /// See also AA::isPotentiallyReachable.
+  virtual bool instructionCanReach(Attributor &A, const Instruction &Inst,
+                                   const Function &Fn,
+                                   bool UseBackwards = true) const = 0;
 
   /// Create an abstract attribute view for the position \p IRP.
   static AAFunctionReachability &createForPosition(const IRPosition &IRP,
                                                    Attributor &A);
 
   /// See AbstractAttribute::getName()
-  const std::string getName() const override { return "AAFuncitonReacability"; }
+  const std::string getName() const override {
+    return "AAFunctionReachability";
+  }
 
   /// See AbstractAttribute::getIdAddr()
   const char *getIdAddr() const override { return &ID; }
