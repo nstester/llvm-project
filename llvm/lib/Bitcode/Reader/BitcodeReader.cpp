@@ -1647,9 +1647,7 @@ Error BitcodeReader::parseAttributeGroupBlock() {
           }
 
           B.addAttribute(KindStr.str(), ValStr.str());
-        } else {
-          assert((Record[i] == 5 || Record[i] == 6) &&
-                 "Invalid attribute group entry");
+        } else if (Record[i] == 5 || Record[i] == 6) {
           bool HasType = Record[i] == 6;
           Attribute::AttrKind Kind;
           if (Error Err = parseAttrKind(Record[++i], &Kind))
@@ -1658,6 +1656,8 @@ Error BitcodeReader::parseAttributeGroupBlock() {
             return error("Not a type attribute");
 
           B.addTypeAttr(Kind, HasType ? getTypeByID(Record[++i]) : nullptr);
+        } else {
+          return error("Invalid attribute group entry");
         }
       }
 
@@ -2107,10 +2107,14 @@ Error BitcodeReader::parseGlobalValueSymbolTable() {
     if (!MaybeRecord)
       return MaybeRecord.takeError();
     switch (MaybeRecord.get()) {
-    case bitc::VST_CODE_FNENTRY: // [valueid, offset]
+    case bitc::VST_CODE_FNENTRY: { // [valueid, offset]
+      unsigned ValueID = Record[0];
+      if (ValueID >= ValueList.size() || !ValueList[ValueID])
+        return error("Invalid value reference in symbol table");
       setDeferredFunctionInfo(FuncBitcodeOffsetDelta,
-                              cast<Function>(ValueList[Record[0]]), Record);
+                              cast<Function>(ValueList[ValueID]), Record);
       break;
+    }
     }
   }
 }
