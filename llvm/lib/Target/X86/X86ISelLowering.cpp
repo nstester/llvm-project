@@ -25746,8 +25746,8 @@ static SDValue getTargetVShiftNode(unsigned Opc, const SDLoc &dl, MVT VT,
           DAG.getConstant(0, dl, AmtVT.getScalarType()));
       MaskElts[0] = DAG.getAllOnesConstant(dl, AmtVT.getScalarType());
       SDValue Mask = DAG.getBuildVector(AmtVT, dl, MaskElts);
-      if (Mask = DAG.FoldConstantArithmetic(ISD::AND, dl, AmtVT,
-                                            {ShAmt.getOperand(1), Mask})) {
+      if ((Mask = DAG.FoldConstantArithmetic(ISD::AND, dl, AmtVT,
+                                             {ShAmt.getOperand(1), Mask}))) {
         ShAmt = DAG.getNode(ISD::AND, dl, AmtVT, ShAmt.getOperand(0), Mask);
         IsMasked = true;
       }
@@ -50341,20 +50341,21 @@ static SDValue combineCVTP2I_CVTTP2I(SDNode *N, SelectionDAG &DAG,
 static SDValue combineAndnp(SDNode *N, SelectionDAG &DAG,
                             TargetLowering::DAGCombinerInfo &DCI,
                             const X86Subtarget &Subtarget) {
+  SDValue N0 = N->getOperand(0);
+  SDValue N1 = N->getOperand(1);
   MVT VT = N->getSimpleValueType(0);
 
   // ANDNP(0, x) -> x
-  if (ISD::isBuildVectorAllZeros(N->getOperand(0).getNode()))
-    return N->getOperand(1);
+  if (ISD::isBuildVectorAllZeros(N0.getNode()))
+    return N1;
 
   // ANDNP(x, 0) -> 0
-  if (ISD::isBuildVectorAllZeros(N->getOperand(1).getNode()))
+  if (ISD::isBuildVectorAllZeros(N1.getNode()))
     return DAG.getConstant(0, SDLoc(N), VT);
 
   // Turn ANDNP back to AND if input is inverted.
-  if (SDValue Not = IsNOT(N->getOperand(0), DAG))
-    return DAG.getNode(ISD::AND, SDLoc(N), VT, DAG.getBitcast(VT, Not),
-                       N->getOperand(1));
+  if (SDValue Not = IsNOT(N0, DAG))
+    return DAG.getNode(ISD::AND, SDLoc(N), VT, DAG.getBitcast(VT, Not), N1);
 
   // Attempt to recursively combine a bitmask ANDNP with shuffles.
   if (VT.isVector() && (VT.getScalarSizeInBits() % 8) == 0) {
