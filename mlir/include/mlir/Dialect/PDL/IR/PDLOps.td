@@ -16,6 +16,7 @@
 include "mlir/Dialect/PDL/IR/PDLTypes.td"
 include "mlir/IR/OpAsmInterface.td"
 include "mlir/IR/SymbolInterfaces.td"
+include "mlir/Interfaces/SideEffectInterfaces.td"
 
 //===----------------------------------------------------------------------===//
 // PDL Ops
@@ -500,7 +501,7 @@ def PDL_ReplaceOp : PDL_Op<"replace", [
 // pdl::ResultOp
 //===----------------------------------------------------------------------===//
 
-def PDL_ResultOp : PDL_Op<"result", [NoSideEffect]> {
+def PDL_ResultOp : PDL_Op<"result"> {
   let summary = "Extract a result from an operation";
   let description = [{
     `pdl.result` operations extract result edges from an operation node within
@@ -532,7 +533,7 @@ def PDL_ResultOp : PDL_Op<"result", [NoSideEffect]> {
 // pdl::ResultsOp
 //===----------------------------------------------------------------------===//
 
-def PDL_ResultsOp : PDL_Op<"results", [NoSideEffect]> {
+def PDL_ResultsOp : PDL_Op<"results"> {
   let summary = "Extract a result group from an operation";
   let description = [{
     `pdl.results` operations extract a result group from an operation within a
