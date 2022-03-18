@@ -591,8 +591,8 @@ define void @ChecksExtractScores_different_vectors(double* %storeArray, double* 
 ; CHECK-LABEL: @ChecksExtractScores_different_vectors(
 ; CHECK-NEXT:    [[IDX0:%.*]] = getelementptr inbounds double, double* [[ARRAY:%.*]], i64 0
 ; CHECK-NEXT:    [[IDX1:%.*]] = getelementptr inbounds double, double* [[ARRAY]], i64 1
-; CHECK-NEXT:    [[TMP1:%.*]] = bitcast double* [[IDX0]] to <2 x double>*
-; CHECK-NEXT:    [[TMP2:%.*]] = load <2 x double>, <2 x double>* [[TMP1]], align 4
+; CHECK-NEXT:    [[LOADA0:%.*]] = load double, double* [[IDX0]], align 4
+; CHECK-NEXT:    [[LOADA1:%.*]] = load double, double* [[IDX1]], align 4
 ; CHECK-NEXT:    [[LOADVEC:%.*]] = load <2 x double>, <2 x double>* [[VECPTR1:%.*]], align 4
 ; CHECK-NEXT:    [[LOADVEC2:%.*]] = load <2 x double>, <2 x double>* [[VECPTR2:%.*]], align 4
 ; CHECK-NEXT:    [[EXTRA0:%.*]] = extractelement <2 x double> [[LOADVEC]], i32 0
@@ -601,18 +601,21 @@ define void @ChecksExtractScores_different_vectors(double* %storeArray, double* 
 ; CHECK-NEXT:    [[LOADVEC4:%.*]] = load <2 x double>, <2 x double>* [[VECPTR4:%.*]], align 4
 ; CHECK-NEXT:    [[EXTRB0:%.*]] = extractelement <2 x double> [[LOADVEC3]], i32 0
 ; CHECK-NEXT:    [[EXTRB1:%.*]] = extractelement <2 x double> [[LOADVEC4]], i32 1
-; CHECK-NEXT:    [[TMP3:%.*]] = insertelement <2 x double> poison, double [[EXTRA1]], i32 0
-; CHECK-NEXT:    [[TMP4:%.*]] = insertelement <2 x double> [[TMP3]], double [[EXTRB0]], i32 1
-; CHECK-NEXT:    [[TMP5:%.*]] = fmul <2 x double> [[TMP4]], [[TMP2]]
-; CHECK-NEXT:    [[SHUFFLE:%.*]] = shufflevector <2 x double> [[TMP5]], <2 x double> poison, <2 x i32> <i32 1, i32 0>
-; CHECK-NEXT:    [[TMP6:%.*]] = insertelement <2 x double> poison, double [[EXTRA0]], i32 0
+; CHECK-NEXT:    [[TMP1:%.*]] = insertelement <2 x double> poison, double [[EXTRA0]], i32 0
+; CHECK-NEXT:    [[TMP2:%.*]] = insertelement <2 x double> [[TMP1]], double [[EXTRA1]], i32 1
+; CHECK-NEXT:    [[TMP3:%.*]] = insertelement <2 x double> poison, double [[LOADA0]], i32 0
+; CHECK-NEXT:    [[TMP4:%.*]] = insertelement <2 x double> [[TMP3]], double [[LOADA0]], i32 1
+; CHECK-NEXT:    [[TMP5:%.*]] = fmul <2 x double> [[TMP2]], [[TMP4]]
+; CHECK-NEXT:    [[TMP6:%.*]] = insertelement <2 x double> poison, double [[EXTRB0]], i32 0
 ; CHECK-NEXT:    [[TMP7:%.*]] = insertelement <2 x double> [[TMP6]], double [[EXTRB1]], i32 1
-; CHECK-NEXT:    [[TMP8:%.*]] = fmul <2 x double> [[TMP7]], [[TMP2]]
-; CHECK-NEXT:    [[TMP9:%.*]] = fadd <2 x double> [[SHUFFLE]], [[TMP8]]
+; CHECK-NEXT:    [[TMP8:%.*]] = insertelement <2 x double> poison, double [[LOADA1]], i32 0
+; CHECK-NEXT:    [[TMP9:%.*]] = insertelement <2 x double> [[TMP8]], double [[LOADA1]], i32 1
+; CHECK-NEXT:    [[TMP10:%.*]] = fmul <2 x double> [[TMP7]], [[TMP9]]
+; CHECK-NEXT:    [[TMP11:%.*]] = fadd <2 x double> [[TMP5]], [[TMP10]]
 ; CHECK-NEXT:    [[SIDX0:%.*]] = getelementptr inbounds double, double* [[STOREARRAY:%.*]], i64 0
 ; CHECK-NEXT:    [[SIDX1:%.*]] = getelementptr inbounds double, double* [[STOREARRAY]], i64 1
-; CHECK-NEXT:    [[TMP10:%.*]] = bitcast double* [[SIDX0]] to <2 x double>*
-; CHECK-NEXT:    store <2 x double> [[TMP9]], <2 x double>* [[TMP10]], align 8
+; CHECK-NEXT:    [[TMP12:%.*]] = bitcast double* [[SIDX0]] to <2 x double>*
+; CHECK-NEXT:    store <2 x double> [[TMP11]], <2 x double>* [[TMP12]], align 8
 ; CHECK-NEXT:    ret void
 ;
   %idx0 = getelementptr inbounds double, double* %array, i64 0
@@ -641,4 +644,110 @@ define void @ChecksExtractScores_different_vectors(double* %storeArray, double* 
   store double %add0, double *%sidx0, align 8
   store double %add1, double *%sidx1, align 8
   ret void
+}
+
+; This checks that we we prefer splats rather than reverse load vectors + shuffles.
+; 2-wide splat loads in x86 use a single instruction so they are quite cheap.
+define double @splat_loads(double *%array1, double *%array2, double *%ptrA, double *%ptrB) {
+; CHECK-LABEL: @splat_loads(
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    [[GEP_1_0:%.*]] = getelementptr inbounds double, double* [[ARRAY1:%.*]], i64 0
+; CHECK-NEXT:    [[GEP_1_1:%.*]] = getelementptr inbounds double, double* [[ARRAY1]], i64 1
+; CHECK-NEXT:    [[TMP0:%.*]] = bitcast double* [[GEP_1_0]] to <2 x double>*
+; CHECK-NEXT:    [[TMP1:%.*]] = load <2 x double>, <2 x double>* [[TMP0]], align 8
+; CHECK-NEXT:    [[GEP_2_0:%.*]] = getelementptr inbounds double, double* [[ARRAY2:%.*]], i64 0
+; CHECK-NEXT:    [[GEP_2_1:%.*]] = getelementptr inbounds double, double* [[ARRAY2]], i64 1
+; CHECK-NEXT:    [[LD_2_0:%.*]] = load double, double* [[GEP_2_0]], align 8
+; CHECK-NEXT:    [[LD_2_1:%.*]] = load double, double* [[GEP_2_1]], align 8
+; CHECK-NEXT:    [[TMP2:%.*]] = insertelement <2 x double> poison, double [[LD_2_0]], i32 0
+; CHECK-NEXT:    [[TMP3:%.*]] = insertelement <2 x double> [[TMP2]], double [[LD_2_0]], i32 1
+; CHECK-NEXT:    [[TMP4:%.*]] = fmul <2 x double> [[TMP1]], [[TMP3]]
+; CHECK-NEXT:    [[TMP5:%.*]] = insertelement <2 x double> poison, double [[LD_2_1]], i32 0
+; CHECK-NEXT:    [[TMP6:%.*]] = insertelement <2 x double> [[TMP5]], double [[LD_2_1]], i32 1
+; CHECK-NEXT:    [[TMP7:%.*]] = fmul <2 x double> [[TMP1]], [[TMP6]]
+; CHECK-NEXT:    [[TMP8:%.*]] = fadd <2 x double> [[TMP4]], [[TMP7]]
+; CHECK-NEXT:    [[TMP9:%.*]] = extractelement <2 x double> [[TMP8]], i32 0
+; CHECK-NEXT:    [[TMP10:%.*]] = extractelement <2 x double> [[TMP8]], i32 1
+; CHECK-NEXT:    [[ADD3:%.*]] = fadd double [[TMP9]], [[TMP10]]
+; CHECK-NEXT:    ret double [[ADD3]]
+;
+entry:
+  %gep_1_0 = getelementptr inbounds double, double* %array1, i64 0
+  %gep_1_1 = getelementptr inbounds double, double* %array1, i64 1
+  %ld_1_0 = load double, double* %gep_1_0, align 8
+  %ld_1_1 = load double, double* %gep_1_1, align 8
+
+  %gep_2_0 = getelementptr inbounds double, double* %array2, i64 0
+  %gep_2_1 = getelementptr inbounds double, double* %array2, i64 1
+  %ld_2_0 = load double, double* %gep_2_0, align 8
+  %ld_2_1 = load double, double* %gep_2_1, align 8
+
+  %mul1 = fmul double %ld_1_0, %ld_2_0
+  %mul2 = fmul double %ld_1_1, %ld_2_0
+
+  %mul3 = fmul double %ld_1_0, %ld_2_1
+  %mul4 = fmul double %ld_1_1, %ld_2_1
+
+  %add1 = fadd double %mul1, %mul3
+  %add2 = fadd double %mul2, %mul4
+
+  %add3 = fadd double %add1, %add2
+  ret double %add3
+}
+
+
+; Same as splat_loads() but the splat load has internal uses in the slp graph.
+define double @splat_loads_with_internal_uses(double *%array1, double *%array2, double *%ptrA, double *%ptrB) {
+; CHECK-LABEL: @splat_loads_with_internal_uses(
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    [[GEP_1_0:%.*]] = getelementptr inbounds double, double* [[ARRAY1:%.*]], i64 0
+; CHECK-NEXT:    [[GEP_1_1:%.*]] = getelementptr inbounds double, double* [[ARRAY1]], i64 1
+; CHECK-NEXT:    [[TMP0:%.*]] = bitcast double* [[GEP_1_0]] to <2 x double>*
+; CHECK-NEXT:    [[TMP1:%.*]] = load <2 x double>, <2 x double>* [[TMP0]], align 8
+; CHECK-NEXT:    [[GEP_2_0:%.*]] = getelementptr inbounds double, double* [[ARRAY2:%.*]], i64 0
+; CHECK-NEXT:    [[GEP_2_1:%.*]] = getelementptr inbounds double, double* [[ARRAY2]], i64 1
+; CHECK-NEXT:    [[TMP2:%.*]] = bitcast double* [[GEP_2_0]] to <2 x double>*
+; CHECK-NEXT:    [[TMP3:%.*]] = load <2 x double>, <2 x double>* [[TMP2]], align 8
+; CHECK-NEXT:    [[SHUFFLE:%.*]] = shufflevector <2 x double> [[TMP3]], <2 x double> poison, <2 x i32> <i32 1, i32 0>
+; CHECK-NEXT:    [[TMP4:%.*]] = fmul <2 x double> [[TMP1]], [[SHUFFLE]]
+; CHECK-NEXT:    [[TMP5:%.*]] = extractelement <2 x double> [[SHUFFLE]], i32 1
+; CHECK-NEXT:    [[TMP6:%.*]] = insertelement <2 x double> poison, double [[TMP5]], i32 0
+; CHECK-NEXT:    [[TMP7:%.*]] = extractelement <2 x double> [[SHUFFLE]], i32 0
+; CHECK-NEXT:    [[TMP8:%.*]] = insertelement <2 x double> [[TMP6]], double [[TMP7]], i32 1
+; CHECK-NEXT:    [[TMP9:%.*]] = fmul <2 x double> [[TMP1]], [[TMP8]]
+; CHECK-NEXT:    [[TMP10:%.*]] = fadd <2 x double> [[TMP4]], [[TMP9]]
+; CHECK-NEXT:    [[TMP11:%.*]] = insertelement <2 x double> [[TMP6]], double [[TMP5]], i32 1
+; CHECK-NEXT:    [[TMP12:%.*]] = fsub <2 x double> [[TMP10]], [[TMP11]]
+; CHECK-NEXT:    [[TMP13:%.*]] = extractelement <2 x double> [[TMP12]], i32 0
+; CHECK-NEXT:    [[TMP14:%.*]] = extractelement <2 x double> [[TMP12]], i32 1
+; CHECK-NEXT:    [[RES:%.*]] = fadd double [[TMP13]], [[TMP14]]
+; CHECK-NEXT:    ret double [[RES]]
+;
+entry:
+  %gep_1_0 = getelementptr inbounds double, double* %array1, i64 0
+  %gep_1_1 = getelementptr inbounds double, double* %array1, i64 1
+  %ld_1_0 = load double, double* %gep_1_0, align 8
+  %ld_1_1 = load double, double* %gep_1_1, align 8
+
+  %gep_2_0 = getelementptr inbounds double, double* %array2, i64 0
+  %gep_2_1 = getelementptr inbounds double, double* %array2, i64 1
+  %ld_2_0 = load double, double* %gep_2_0, align 8
+  %ld_2_1 = load double, double* %gep_2_1, align 8
+
+  %mul1 = fmul double %ld_1_0, %ld_2_0
+  %mul2 = fmul double %ld_1_1, %ld_2_0
+
+  %mul3 = fmul double %ld_1_0, %ld_2_1
+  %mul4 = fmul double %ld_1_1, %ld_2_1
+
+  %add1 = fadd double %mul1, %mul3
+  %add2 = fadd double %mul2, %mul4
+
+  ; One more user for the broadcast of %ld_2_0
+  %sub1 = fsub double %add1, %ld_2_0
+  %sub2 = fsub double %add2, %ld_2_0
+
+  %res = fadd double %sub1, %sub2
+
+  ret double %res
 }
