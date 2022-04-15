@@ -35,6 +35,11 @@ static std::unique_ptr<MachineFunction> cloneMF(MachineFunction *SrcMF) {
     for (auto &SrcMI : SrcMBB) {
       for (unsigned I = 0, E = SrcMI.getNumOperands(); I < E; ++I) {
         auto &DMO = SrcMI.getOperand(I);
+        if (DMO.isRegMask()) {
+          DstMRI->addPhysRegsUsedFromRegMask(DMO.getRegMask());
+          continue;
+        }
+
         if (!DMO.isReg())
           continue;
         Register SrcReg = DMO.getReg();
@@ -54,6 +59,19 @@ static std::unique_ptr<MachineFunction> cloneMF(MachineFunction *SrcMF) {
           DstMRI->setType(DstReg, RegTy);
         Src2DstReg[SrcReg] = DstReg;
       }
+    }
+  }
+
+  // Copy register allocation hints.
+  for (std::pair<Register, Register> RegMapEntry : Src2DstReg) {
+    const auto &Hints = SrcMRI->getRegAllocationHints(RegMapEntry.first);
+    for (Register PrefReg : Hints.second) {
+      if (PrefReg.isVirtual()) {
+        auto PrefRegEntry = Src2DstReg.find(PrefReg);
+        assert(PrefRegEntry !=Src2DstReg.end());
+        DstMRI->addRegAllocationHint(RegMapEntry.second, PrefRegEntry->second);
+      } else
+        DstMRI->addRegAllocationHint(RegMapEntry.second, PrefReg);
     }
   }
 
