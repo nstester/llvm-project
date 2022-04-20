@@ -270,7 +270,8 @@ template <> struct MappingTraits<SIMode> {
 struct SIMachineFunctionInfo final : public yaml::MachineFunctionInfo {
   uint64_t ExplicitKernArgSize = 0;
   unsigned MaxKernArgAlign = 0;
-  unsigned LDSSize = 0;
+  uint32_t LDSSize = 0;
+  uint32_t GDSSize = 0;
   Align DynLDSAlign;
   bool IsEntryFunction = false;
   bool NoSignedZerosFPMath = false;
@@ -288,6 +289,9 @@ struct SIMachineFunctionInfo final : public yaml::MachineFunctionInfo {
   StringValue ScratchRSrcReg = "$private_rsrc_reg";
   StringValue FrameOffsetReg = "$fp_reg";
   StringValue StackPtrOffsetReg = "$sp_reg";
+
+  unsigned BytesInStackArgArea = 0;
+  bool ReturnsVoid = true;
 
   Optional<SIArgumentInfo> ArgInfo;
   SIMode Mode;
@@ -308,6 +312,7 @@ template <> struct MappingTraits<SIMachineFunctionInfo> {
                        UINT64_C(0));
     YamlIO.mapOptional("maxKernArgAlign", MFI.MaxKernArgAlign, 0u);
     YamlIO.mapOptional("ldsSize", MFI.LDSSize, 0u);
+    YamlIO.mapOptional("gdsSize", MFI.GDSSize, 0u);
     YamlIO.mapOptional("dynLDSAlign", MFI.DynLDSAlign, Align());
     YamlIO.mapOptional("isEntryFunction", MFI.IsEntryFunction, false);
     YamlIO.mapOptional("noSignedZerosFPMath", MFI.NoSignedZerosFPMath, false);
@@ -321,6 +326,8 @@ template <> struct MappingTraits<SIMachineFunctionInfo> {
                        StringValue("$fp_reg"));
     YamlIO.mapOptional("stackPtrOffsetReg", MFI.StackPtrOffsetReg,
                        StringValue("$sp_reg"));
+    YamlIO.mapOptional("bytesInStackArgArea", MFI.BytesInStackArgArea, 0u);
+    YamlIO.mapOptional("returnsVoid", MFI.ReturnsVoid, true);
     YamlIO.mapOptional("argumentInfo", MFI.ArgInfo);
     YamlIO.mapOptional("mode", MFI.Mode, SIMode());
     YamlIO.mapOptional("highBitsOf32BitAddress",
