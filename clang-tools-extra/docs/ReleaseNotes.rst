@@ -157,7 +157,7 @@ Changes in existing checks
   compared against a `__int128_t`.
 
 - Made :doc:`cert-oop57-cpp <clang-tidy/checks/cert-oop57-cpp>` more sensitive
-  by checking for an arbitrary expression in the second argument of `memset`.
+  by checking for an arbitrary expression in the second argument of ``memset``.
 
 - Improved :doc:`cppcoreguidelines-prefer-member-initializer
   <clang-tidy/checks/cppcoreguidelines-prefer-member-initializer>` check.
