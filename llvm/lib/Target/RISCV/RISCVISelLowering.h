@@ -47,6 +47,9 @@ enum NodeType : unsigned {
   // Get the Hi 20 bits from an address. Selected to LUI.
   HI,
 
+  // Represents an AUIPC+ADDI pair. Selected to PseudoLLA.
+  LLA,
+
   // Multiply high for signedxunsigned.
   MULHSU,
   // RV64I shifts, directly matching the semantics of the named RISC-V
@@ -406,6 +409,8 @@ public:
                                            const APInt &DemandedElts,
                                            const SelectionDAG &DAG,
                                            unsigned Depth) const override;
+
+  const Constant *getTargetConstantFromLoad(LoadSDNode *LD) const override;
 
   // This method returns the name of a target specific DAG node.
   const char *getTargetNodeName(unsigned Opcode) const override;

@@ -3606,7 +3606,7 @@ SDValue RISCVTargetLowering::getAddr(NodeTy *N, SelectionDAG &DAG,
       // Use PC-relative addressing to access the symbol. This generates the
       // pattern (PseudoLLA sym), which expands to (addi (auipc %pcrel_hi(sym))
       // %pcrel_lo(auipc)).
-      return SDValue(DAG.getMachineNode(RISCV::PseudoLLA, DL, Ty, Addr), 0);
+      return DAG.getNode(RISCVISD::LLA, DL, Ty, Addr);
 
     // Use PC-relative addressing to access the GOT for this symbol, then load
     // the address from the GOT. This generates the pattern (PseudoLA sym),
@@ -3639,7 +3639,7 @@ SDValue RISCVTargetLowering::getAddr(NodeTy *N, SelectionDAG &DAG,
     // the address space. This generates the pattern (PseudoLLA sym), which
     // expands to (addi (auipc %pcrel_hi(sym)) %pcrel_lo(auipc)).
     SDValue Addr = getTargetNode(N, DL, Ty, DAG, 0);
-    return SDValue(DAG.getMachineNode(RISCV::PseudoLLA, DL, Ty, Addr), 0);
+    return DAG.getNode(RISCVISD::LLA, DL, Ty, Addr);
   }
   }
 }
@@ -9382,6 +9382,51 @@ unsigned RISCVTargetLowering::ComputeNumSignBitsForTargetNode(
   return 1;
 }
 
+const Constant *
+RISCVTargetLowering::getTargetConstantFromLoad(LoadSDNode *Ld) const {
+  assert(Ld && "Unexpected null LoadSDNode");
+  if (!ISD::isNormalLoad(Ld))
+    return nullptr;
+
+  SDValue Ptr = Ld->getBasePtr();
+
+  // Only constant pools with no offset are supported.
+  auto GetSupportedConstantPool = [](SDValue Ptr) -> ConstantPoolSDNode * {
+    auto *CNode = dyn_cast<ConstantPoolSDNode>(Ptr);
+    if (!CNode || CNode->isMachineConstantPoolEntry() ||
+        CNode->getOffset() != 0)
+      return nullptr;
+
+    return CNode;
+  };
+
+  // Simple case, LLA.
+  if (Ptr.getOpcode() == RISCVISD::LLA) {
+    auto *CNode = GetSupportedConstantPool(Ptr);
+    if (!CNode || CNode->getTargetFlags() != 0)
+      return nullptr;
+
+    return CNode->getConstVal();
+  }
+
+  // Look for a HI and ADD_LO pair.
+  if (Ptr.getOpcode() != RISCVISD::ADD_LO ||
+      Ptr.getOperand(0).getOpcode() != RISCVISD::HI)
+    return nullptr;
+
+  auto *CNodeLo = GetSupportedConstantPool(Ptr.getOperand(1));
+  auto *CNodeHi = GetSupportedConstantPool(Ptr.getOperand(0).getOperand(0));
+
+  if (!CNodeLo || CNodeLo->getTargetFlags() != RISCVII::MO_LO ||
+      !CNodeHi || CNodeHi->getTargetFlags() != RISCVII::MO_HI)
+    return nullptr;
+
+  if (CNodeLo->getConstVal() != CNodeHi->getConstVal())
+    return nullptr;
+
+  return CNodeLo->getConstVal();
+}
+
 static MachineBasicBlock *emitReadCycleWidePseudo(MachineInstr &MI,
                                                   MachineBasicBlock *BB) {
   assert(MI.getOpcode() == RISCV::ReadCycleWide && "Unexpected instruction");
@@ -11115,6 +11160,7 @@ const char *RISCVTargetLowering::getTargetNodeName(unsigned Opcode) const {
   NODE_NAME_CASE(TAIL)
   NODE_NAME_CASE(ADD_LO)
   NODE_NAME_CASE(HI)
+  NODE_NAME_CASE(LLA)
   NODE_NAME_CASE(MULHSU)
   NODE_NAME_CASE(SLLW)
   NODE_NAME_CASE(SRAW)
