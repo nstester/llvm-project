@@ -20,8 +20,10 @@ define zeroext i1 @strchr_to_memchr_n_equals_len(i32 %c) {
 
 define zeroext i1 @memchr_n_equals_len(i32 %c) {
 ; CHECK-LABEL: @memchr_n_equals_len(
-; CHECK-NEXT:    [[CALL:%.*]] = tail call i8* @memchr(i8* noundef nonnull dereferenceable(3) getelementptr inbounds ([2 x i8], [2 x i8]* @.str.1, i64 0, i64 0), i32 [[C:%.*]], i64 2)
-; CHECK-NEXT:    [[CMP:%.*]] = icmp eq i8* [[CALL]], null
+; CHECK-NEXT:    [[TMP1:%.*]] = trunc i32 [[C:%.*]] to i8
+; CHECK-NEXT:    [[TMP2:%.*]] = icmp ne i8 [[TMP1]], 10
+; CHECK-NEXT:    [[TMP3:%.*]] = icmp ne i8 [[TMP1]], 13
+; CHECK-NEXT:    [[CMP:%.*]] = and i1 [[TMP3]], [[TMP2]]
 ; CHECK-NEXT:    ret i1 [[CMP]]
 ;
   %call = tail call i8* @memchr(i8* nonnull dereferenceable(3) getelementptr inbounds ([2 x i8], [2 x i8]* @.str.1, i64 0, i64 0), i32 %c, i64 2)
@@ -65,8 +67,12 @@ define i8* @memchr_no_zero_cmp(i32 %c) {
 
 define i8* @memchr_no_zero_cmp2(i32 %c) {
 ; CHECK-LABEL: @memchr_no_zero_cmp2(
-; CHECK-NEXT:    [[MEMCHR:%.*]] = tail call i8* @memchr(i8* noundef nonnull dereferenceable(1) getelementptr inbounds ([2 x i8], [2 x i8]* @.str.1, i64 0, i64 0), i32 [[C:%.*]], i64 3)
-; CHECK-NEXT:    ret i8* [[MEMCHR]]
+; CHECK-NEXT:    [[TMP1:%.*]] = trunc i32 [[C:%.*]] to i8
+; CHECK-NEXT:    [[TMP2:%.*]] = icmp eq i8 [[TMP1]], 10
+; CHECK-NEXT:    [[MEMCHR_SEL1:%.*]] = select i1 [[TMP2]], i8* getelementptr inbounds ([2 x i8], [2 x i8]* @.str.1, i64 0, i64 1), i8* null
+; CHECK-NEXT:    [[TMP3:%.*]] = icmp eq i8 [[TMP1]], 13
+; CHECK-NEXT:    [[MEMCHR_SEL2:%.*]] = select i1 [[TMP3]], i8* getelementptr inbounds ([2 x i8], [2 x i8]* @.str.1, i64 0, i64 0), i8* [[MEMCHR_SEL1]]
+; CHECK-NEXT:    ret i8* [[MEMCHR_SEL2]]
 ;
   %call = tail call i8* @strchr(i8* nonnull dereferenceable(3) getelementptr inbounds ([2 x i8], [2 x i8]* @.str.1, i64 0, i64 0), i32 %c)
   ret i8* %call
@@ -87,8 +93,10 @@ define zeroext i1 @memchr_n_equals_len_minsize(i32 %c) minsize {
 
 define zeroext i1 @memchr_n_equals_len2_minsize(i32 %c) minsize {
 ; CHECK-LABEL: @memchr_n_equals_len2_minsize(
-; CHECK-NEXT:    [[CALL:%.*]] = tail call i8* @memchr(i8* noundef nonnull dereferenceable(3) getelementptr inbounds ([2 x i8], [2 x i8]* @.str.1, i64 0, i64 0), i32 [[C:%.*]], i64 2)
-; CHECK-NEXT:    [[CMP:%.*]] = icmp eq i8* [[CALL]], null
+; CHECK-NEXT:    [[TMP1:%.*]] = trunc i32 [[C:%.*]] to i8
+; CHECK-NEXT:    [[TMP2:%.*]] = icmp ne i8 [[TMP1]], 10
+; CHECK-NEXT:    [[TMP3:%.*]] = icmp ne i8 [[TMP1]], 13
+; CHECK-NEXT:    [[CMP:%.*]] = and i1 [[TMP3]], [[TMP2]]
 ; CHECK-NEXT:    ret i1 [[CMP]]
 ;
   %call = tail call i8* @memchr(i8* nonnull dereferenceable(3) getelementptr inbounds ([2 x i8], [2 x i8]* @.str.1, i64 0, i64 0), i32 %c, i64 2)
