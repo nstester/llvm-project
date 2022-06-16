@@ -15,15 +15,46 @@ using namespace llvm;
 /// Copied from <linux/perf_event.h> to avoid depending on perf_event.h on
 /// non-linux platforms.
 /// \{
+#define PERF_RECORD_MISC_SWITCH_OUT (1 << 13)
+#define PERF_RECORD_MAX 19
+#define PERF_RECORD_SWITCH_CPU_WIDE 15
+
 struct perf_event_header {
   uint32_t type;
   uint16_t misc;
   uint16_t size;
-};
 
-#define PERF_RECORD_MISC_SWITCH_OUT (1 << 13)
-#define PERF_RECORD_MAX 19
-#define PERF_RECORD_SWITCH_CPU_WIDE 15
+  /// \return
+  ///   An \a llvm::Error if the record looks obviously wrong, or \a
+  ///   llvm::Error::success() otherwise.
+  Error SanityCheck() const {
+    // The following checks are based on visual inspection of the records and
+    // enums in
+    // https://elixir.bootlin.com/linux/v4.8/source/include/uapi/linux/perf_event.h
+    // See PERF_RECORD_MAX, PERF_RECORD_SWITCH and the data similar records
+    // hold.
+
+    // A record of too many uint64_t's or more should mean that the data is
+    // wrong
+    const uint64_t max_valid_size_bytes = 8000;
+    if (size == 0 || size > max_valid_size_bytes)
+      return createStringError(
+          inconvertibleErrorCode(),
+          formatv("A record of {0} bytes was found.", size));
+
+    // We add some numbers to PERF_RECORD_MAX because some systems might have
+    // custom records. In any case, we are looking only for abnormal data.
+    if (type >= PERF_RECORD_MAX + 100)
+      return createStringError(
+          inconvertibleErrorCode(),
+          formatv("Invalid record type {0} was found.", type));
+    return Error::success();
+  }
+
+  bool IsContextSwitchRecord() const {
+    return type == PERF_RECORD_SWITCH_CPU_WIDE;
+  }
+};
 /// \}
 
 /// Record found in the perf_event context switch traces. It might contain
@@ -37,30 +68,6 @@ struct PerfContextSwitchRecord {
   uint64_t time_in_nanos;
 
   bool IsOut() const { return header.misc & PERF_RECORD_MISC_SWITCH_OUT; }
-
-  bool IsContextSwitchRecord() const {
-    return header.type == PERF_RECORD_SWITCH_CPU_WIDE;
-  }
-
-  /// \return
-  ///   An \a llvm::Error if the record looks obviously wrong, or \a
-  ///   llvm::Error::success() otherwise.
-  Error SanityCheck() const {
-    // A record of too many uint64_t's or more should mean that the data is
-    // wrong
-    if (header.size == 0 || header.size > sizeof(uint64_t) * 1000)
-      return createStringError(
-          inconvertibleErrorCode(),
-          formatv("A record of {0} bytes was found.", header.size));
-
-    // We add some numbers to PERF_RECORD_MAX because some systems might have
-    // custom records. In any case, we are looking only for abnormal data.
-    if (header.type >= PERF_RECORD_MAX + 100)
-      return createStringError(
-          inconvertibleErrorCode(),
-          formatv("Invalid record type {0} was found.", header.type));
-    return Error::success();
-  }
 };
 
 /// Record produced after parsing the raw context switch trace produce by
@@ -126,9 +133,9 @@ uint64_t ThreadContinuousExecution::GetEndTSC() const {
 }
 
 ThreadContinuousExecution ThreadContinuousExecution::CreateCompleteExecution(
-    lldb::core_id_t core_id, lldb::tid_t tid, lldb::pid_t pid, uint64_t start,
+    lldb::cpu_id_t cpu_id, lldb::tid_t tid, lldb::pid_t pid, uint64_t start,
     uint64_t end) {
-  ThreadContinuousExecution o(core_id, tid, pid);
+  ThreadContinuousExecution o(cpu_id, tid, pid);
   o.variant = Variant::Complete;
   o.tscs.complete.start = start;
   o.tscs.complete.end = end;
@@ -136,9 +143,9 @@ ThreadContinuousExecution ThreadContinuousExecution::CreateCompleteExecution(
 }
 
 ThreadContinuousExecution ThreadContinuousExecution::CreateHintedStartExecution(
-    lldb::core_id_t core_id, lldb::tid_t tid, lldb::pid_t pid,
+    lldb::cpu_id_t cpu_id, lldb::tid_t tid, lldb::pid_t pid,
     uint64_t hinted_start, uint64_t end) {
-  ThreadContinuousExecution o(core_id, tid, pid);
+  ThreadContinuousExecution o(cpu_id, tid, pid);
   o.variant = Variant::HintedStart;
   o.tscs.hinted_start.hinted_start = hinted_start;
   o.tscs.hinted_start.end = end;
@@ -146,9 +153,9 @@ ThreadContinuousExecution ThreadContinuousExecution::CreateHintedStartExecution(
 }
 
 ThreadContinuousExecution ThreadContinuousExecution::CreateHintedEndExecution(
-    lldb::core_id_t core_id, lldb::tid_t tid, lldb::pid_t pid, uint64_t start,
+    lldb::cpu_id_t cpu_id, lldb::tid_t tid, lldb::pid_t pid, uint64_t start,
     uint64_t hinted_end) {
-  ThreadContinuousExecution o(core_id, tid, pid);
+  ThreadContinuousExecution o(cpu_id, tid, pid);
   o.variant = Variant::HintedEnd;
   o.tscs.hinted_end.start = start;
   o.tscs.hinted_end.hinted_end = hinted_end;
@@ -156,23 +163,23 @@ ThreadContinuousExecution ThreadContinuousExecution::CreateHintedEndExecution(
 }
 
 ThreadContinuousExecution ThreadContinuousExecution::CreateOnlyEndExecution(
-    lldb::core_id_t core_id, lldb::tid_t tid, lldb::pid_t pid, uint64_t end) {
-  ThreadContinuousExecution o(core_id, tid, pid);
+    lldb::cpu_id_t cpu_id, lldb::tid_t tid, lldb::pid_t pid, uint64_t end) {
+  ThreadContinuousExecution o(cpu_id, tid, pid);
   o.variant = Variant::OnlyEnd;
   o.tscs.only_end.end = end;
   return o;
 }
 
 ThreadContinuousExecution ThreadContinuousExecution::CreateOnlyStartExecution(
-    lldb::core_id_t core_id, lldb::tid_t tid, lldb::pid_t pid, uint64_t start) {
-  ThreadContinuousExecution o(core_id, tid, pid);
+    lldb::cpu_id_t cpu_id, lldb::tid_t tid, lldb::pid_t pid, uint64_t start) {
+  ThreadContinuousExecution o(cpu_id, tid, pid);
   o.variant = Variant::OnlyStart;
   o.tscs.only_start.start = start;
   return o;
 }
 
 static Error RecoverExecutionsFromConsecutiveRecords(
-    core_id_t core_id, const LinuxPerfZeroTscConversion &tsc_conversion,
+    cpu_id_t cpu_id, const LinuxPerfZeroTscConversion &tsc_conversion,
     const ContextSwitchRecord &current_record,
     const Optional<ContextSwitchRecord> &prev_record,
     std::function<void(const ThreadContinuousExecution &execution)>
@@ -180,7 +187,7 @@ static Error RecoverExecutionsFromConsecutiveRecords(
   if (!prev_record) {
     if (current_record.IsOut()) {
       on_new_execution(ThreadContinuousExecution::CreateOnlyEndExecution(
-          core_id, current_record.tid, current_record.pid, current_record.tsc));
+          cpu_id, current_record.tid, current_record.pid, current_record.tsc));
     }
     // The 'in' case will be handled later when we try to look for its end
     return Error::success();
@@ -198,37 +205,35 @@ static Error RecoverExecutionsFromConsecutiveRecords(
     // We found two consecutive ins, which means that we didn't capture
     // the end of the previous execution.
     on_new_execution(ThreadContinuousExecution::CreateHintedEndExecution(
-        core_id, prev.tid, prev.pid, prev.tsc, current_record.tsc - 1));
+        cpu_id, prev.tid, prev.pid, prev.tsc, current_record.tsc - 1));
   } else if (current_record.IsOut() && prev.IsOut()) {
     // We found two consecutive outs, that means that we didn't capture
     // the beginning of the current execution.
     on_new_execution(ThreadContinuousExecution::CreateHintedStartExecution(
-        core_id, current_record.tid, current_record.pid, prev.tsc + 1,
+        cpu_id, current_record.tid, current_record.pid, prev.tsc + 1,
         current_record.tsc));
   } else if (current_record.IsOut() && prev.IsIn()) {
     if (current_record.pid == prev.pid && current_record.tid == prev.tid) {
       /// A complete execution
       on_new_execution(ThreadContinuousExecution::CreateCompleteExecution(
-          core_id, current_record.tid, current_record.pid, prev.tsc,
+          cpu_id, current_record.tid, current_record.pid, prev.tsc,
           current_record.tsc));
     } else {
       // An out after the in of a different thread. The first one doesn't
       // have an end, and the second one doesn't have a start.
       on_new_execution(ThreadContinuousExecution::CreateHintedEndExecution(
-          core_id, prev.tid, prev.pid, prev.tsc, current_record.tsc - 1));
+          cpu_id, prev.tid, prev.pid, prev.tsc, current_record.tsc - 1));
       on_new_execution(ThreadContinuousExecution::CreateHintedStartExecution(
-          core_id, current_record.tid, current_record.pid, prev.tsc + 1,
+          cpu_id, current_record.tid, current_record.pid, prev.tsc + 1,
           current_record.tsc));
     }
   }
   return Error::success();
 }
 
-#include <fstream>
-
 Expected<std::vector<ThreadContinuousExecution>>
 lldb_private::trace_intel_pt::DecodePerfContextSwitchTrace(
-    ArrayRef<uint8_t> data, core_id_t core_id,
+    ArrayRef<uint8_t> data, cpu_id_t cpu_id,
     const LinuxPerfZeroTscConversion &tsc_conversion) {
 
   std::vector<ThreadContinuousExecution> executions;
@@ -239,20 +244,23 @@ lldb_private::trace_intel_pt::DecodePerfContextSwitchTrace(
   auto do_decode = [&]() -> Error {
     Optional<ContextSwitchRecord> prev_record;
     while (offset < data.size()) {
-      const PerfContextSwitchRecord &perf_record =
-          *reinterpret_cast<const PerfContextSwitchRecord *>(data.data() +
-                                                             offset);
+      const perf_event_header &perf_record =
+          *reinterpret_cast<const perf_event_header *>(data.data() + offset);
       if (Error err = perf_record.SanityCheck())
         return err;
 
       if (perf_record.IsContextSwitchRecord()) {
+        const PerfContextSwitchRecord &context_switch_record =
+            *reinterpret_cast<const PerfContextSwitchRecord *>(data.data() +
+                                                               offset);
         ContextSwitchRecord record{
-            tsc_conversion.ToTSC(perf_record.time_in_nanos),
-            perf_record.IsOut(), static_cast<lldb::pid_t>(perf_record.pid),
-            static_cast<lldb::tid_t>(perf_record.tid)};
+            tsc_conversion.ToTSC(context_switch_record.time_in_nanos),
+            context_switch_record.IsOut(),
+            static_cast<lldb::pid_t>(context_switch_record.pid),
+            static_cast<lldb::tid_t>(context_switch_record.tid)};
 
         if (Error err = RecoverExecutionsFromConsecutiveRecords(
-                core_id, tsc_conversion, record, prev_record,
+                cpu_id, tsc_conversion, record, prev_record,
                 [&](const ThreadContinuousExecution &execution) {
                   executions.push_back(execution);
                 }))
@@ -260,13 +268,13 @@ lldb_private::trace_intel_pt::DecodePerfContextSwitchTrace(
 
         prev_record = record;
       }
-      offset += perf_record.header.size;
+      offset += perf_record.size;
     }
 
     // We might have an incomplete last record
     if (prev_record && prev_record->IsIn())
       executions.push_back(ThreadContinuousExecution::CreateOnlyStartExecution(
-          core_id, prev_record->tid, prev_record->pid, prev_record->tsc));
+          cpu_id, prev_record->tid, prev_record->pid, prev_record->tsc));
     return Error::success();
   };
 
@@ -274,8 +282,7 @@ lldb_private::trace_intel_pt::DecodePerfContextSwitchTrace(
     return createStringError(inconvertibleErrorCode(),
                              formatv("Malformed perf context switch trace for "
                                      "cpu {0} at offset {1}. {2}",
-                                     core_id, offset,
-                                     toString(std::move(err))));
+                                     cpu_id, offset, toString(std::move(err))));
 
   return executions;
 }

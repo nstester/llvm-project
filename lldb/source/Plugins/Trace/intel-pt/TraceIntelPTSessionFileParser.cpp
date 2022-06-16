@@ -29,7 +29,7 @@ FileSpec TraceIntelPTSessionFileParser::NormalizePath(const std::string &path) {
   return file_spec;
 }
 
-Error TraceIntelPTSessionFileParser::ParseModule(lldb::TargetSP &target_sp,
+Error TraceIntelPTSessionFileParser::ParseModule(Target &target,
                                                  const JSONModule &module) {
   auto do_parse = [&]() -> Error {
     FileSpec system_file_spec(module.system_path);
@@ -46,13 +46,13 @@ Error TraceIntelPTSessionFileParser::ParseModule(lldb::TargetSP &target_sp,
 
     Status error;
     ModuleSP module_sp =
-        target_sp->GetOrCreateModule(module_spec, /*notify*/ false, &error);
+        target.GetOrCreateModule(module_spec, /*notify*/ false, &error);
 
     if (error.Fail())
       return error.ToError();
 
     bool load_addr_changed = false;
-    module_sp->SetLoadAddress(*target_sp, module.load_address, false,
+    module_sp->SetLoadAddress(target, module.load_address.value, false,
                               load_addr_changed);
     return Error::success();
   };
@@ -74,17 +74,17 @@ Error TraceIntelPTSessionFileParser::CreateJSONError(json::Path::Root &root,
 }
 
 ThreadPostMortemTraceSP
-TraceIntelPTSessionFileParser::ParseThread(ProcessSP &process_sp,
+TraceIntelPTSessionFileParser::ParseThread(Process &process,
                                            const JSONThread &thread) {
   lldb::tid_t tid = static_cast<lldb::tid_t>(thread.tid);
 
   Optional<FileSpec> trace_file;
-  if (thread.trace_buffer)
-    trace_file = FileSpec(*thread.trace_buffer);
+  if (thread.ipt_trace)
+    trace_file = FileSpec(*thread.ipt_trace);
 
   ThreadPostMortemTraceSP thread_sp =
-      std::make_shared<ThreadPostMortemTrace>(*process_sp, tid, trace_file);
-  process_sp->GetThreadList().AddThread(thread_sp);
+      std::make_shared<ThreadPostMortemTrace>(process, tid, trace_file);
+  process.GetThreadList().AddThread(thread_sp);
   return thread_sp;
 }
 
@@ -110,10 +110,10 @@ TraceIntelPTSessionFileParser::ParseProcess(const JSONProcess &process) {
   process_sp->SetID(static_cast<lldb::pid_t>(process.pid));
 
   for (const JSONThread &thread : process.threads)
-    parsed_process.threads.push_back(ParseThread(process_sp, thread));
+    parsed_process.threads.push_back(ParseThread(*process_sp, thread));
 
   for (const JSONModule &module : process.modules)
-    if (Error err = ParseModule(target_sp, module))
+    if (Error err = ParseModule(*target_sp, module))
       return std::move(err);
 
   if (!process.threads.empty())
@@ -171,10 +171,11 @@ StringRef TraceIntelPTSessionFileParser::GetSchema() {
           // A list of known threads for the given process. When context switch
           // data is provided, LLDB will automatically create threads for the
           // this process whenever it finds new threads when traversing the
-          // context switches.
+          // context switches, so passing values to this list in this case is
+          // optional.
         {
           "tid": integer,
-          "traceBuffer"?: string
+          "iptTrace"?: string
               // Path to the raw Intel PT buffer file for this thread.
         }
       ],
@@ -184,7 +185,7 @@ StringRef TraceIntelPTSessionFileParser::GetSchema() {
               // Original path of the module at runtime.
           "file"?: string,
               // Path to a copy of the file if not available at "systemPath".
-          "loadAddress": integer,
+          "loadAddress": integer | string decimal | hex string,
               // Lowest address of the sections of the module loaded on memory.
           "uuid"?: string,
               // Build UUID for the file for sanity checks.
@@ -192,14 +193,14 @@ StringRef TraceIntelPTSessionFileParser::GetSchema() {
       ]
     }
   ],
-  "cores"?: [
+  "cpus"?: [
     {
-      "coreId": integer,
+      "id": integer,
           // Id of this CPU core.
-      "traceBuffer": string,
-          // Path to the raw Intel PT buffer for this core.
+      "iptTrace": string,
+          // Path to the raw Intel PT buffer for this cpu core.
       "contextSwitchTrace": string,
-          // Path to the raw perf_event_open context switch trace file for this core.
+          // Path to the raw perf_event_open context switch trace file for this cpu core.
           // The perf_event must have been configured with PERF_SAMPLE_TID and
           // PERF_SAMPLE_TIME, as well as sample_id_all = 1.
     }
@@ -211,19 +212,15 @@ StringRef TraceIntelPTSessionFileParser::GetSchema() {
 
     "timeMult": integer,
     "timeShift": integer,
-    "timeZero": integer,
+    "timeZero": integer | string decimal | hex string,
   }
-  "dontCreateThreadsFromContextSwitches"?: boolean,
-    // If this is true, then the automatic creation of threads from context switch
-    // data is disabled, and thus only the threads provided in the "processes.threads"
-    // section will be created.
 }
 
 Notes:
 
 - All paths are either absolute or relative to folder containing the session file.
-- "cores" is provided if and only if processes[].threads[].traceBuffer is not provided.
-- "tscPerfZeroConversion" must be provided if "cores" is provided.
+- "cpus" is provided if and only if processes[].threads[].iptTrace is not provided.
+- "tscPerfZeroConversion" must be provided if "cpus" is provided.
  })";
   }
   return schema;
@@ -231,7 +228,7 @@ Notes:
 
 Error TraceIntelPTSessionFileParser::AugmentThreadsFromContextSwitches(
     JSONTraceSession &session) {
-  if (!session.cores)
+  if (!session.cpus)
     return Error::success();
 
   if (!session.tsc_perf_zero_conversion)
@@ -255,15 +252,15 @@ Error TraceIntelPTSessionFileParser::AugmentThreadsFromContextSwitches(
     if (indexed_threads[proc->second].count(tid))
       return;
     indexed_threads[proc->second].insert(tid);
-    proc->second->threads.push_back({tid, /*trace_buffer=*/None});
+    proc->second->threads.push_back({tid, /*ipt_trace=*/None});
   };
 
-  for (const JSONCore &core : *session.cores) {
+  for (const JSONCpu &cpu : *session.cpus) {
     Error err = Trace::OnDataFileRead(
-        FileSpec(core.context_switch_trace),
+        FileSpec(cpu.context_switch_trace),
         [&](ArrayRef<uint8_t> data) -> Error {
           Expected<std::vector<ThreadContinuousExecution>> executions =
-              DecodePerfContextSwitchTrace(data, core.core_id,
+              DecodePerfContextSwitchTrace(data, cpu.id,
                                            *session.tsc_perf_zero_conversion);
           if (!executions)
             return executions.takeError();
@@ -287,7 +284,8 @@ Expected<TraceSP> TraceIntelPTSessionFileParser::CreateTraceIntelPTInstance(
                    parsed_process.threads.end());
   }
 
-  TraceSP trace_instance(new TraceIntelPT(session, processes, threads));
+  TraceSP trace_instance = TraceIntelPT::CreateInstanceForPostmortemTrace(
+      session, processes, threads);
   for (const ParsedProcess &parsed_process : parsed_processes)
     parsed_process.target_sp->SetTrace(trace_instance);
 
@@ -303,15 +301,15 @@ void TraceIntelPTSessionFileParser::NormalizeAllPaths(
         module.file = NormalizePath(*module.file).GetPath();
     }
     for (JSONThread &thread : process.threads) {
-      if (thread.trace_buffer)
-        thread.trace_buffer = NormalizePath(*thread.trace_buffer).GetPath();
+      if (thread.ipt_trace)
+        thread.ipt_trace = NormalizePath(*thread.ipt_trace).GetPath();
     }
   }
-  if (session.cores) {
-    for (JSONCore &core : *session.cores) {
-      core.context_switch_trace =
-          NormalizePath(core.context_switch_trace).GetPath();
-      core.trace_buffer = NormalizePath(core.trace_buffer).GetPath();
+  if (session.cpus) {
+    for (JSONCpu &cpu : *session.cpus) {
+      cpu.context_switch_trace =
+          NormalizePath(cpu.context_switch_trace).GetPath();
+      cpu.ipt_trace = NormalizePath(cpu.ipt_trace).GetPath();
     }
   }
 }

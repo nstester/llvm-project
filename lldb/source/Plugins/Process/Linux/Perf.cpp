@@ -45,7 +45,7 @@ lldb_private::process_linux::LoadPerfTscConversionParameters() {
   perf_event_mmap_page &mmap_metada = perf_event->GetMetadataPage();
   if (mmap_metada.cap_user_time && mmap_metada.cap_user_time_zero) {
     return LinuxPerfZeroTscConversion{
-        mmap_metada.time_mult, mmap_metada.time_shift, mmap_metada.time_zero};
+        mmap_metada.time_mult, mmap_metada.time_shift, {mmap_metada.time_zero}};
   } else {
     auto err_cap =
         !mmap_metada.cap_user_time ? "cap_user_time" : "cap_user_time_zero";
@@ -73,7 +73,7 @@ void resource_handle::FileDescriptorDeleter::operator()(long *ptr) {
 
 llvm::Expected<PerfEvent> PerfEvent::Init(perf_event_attr &attr,
                                           Optional<lldb::pid_t> pid,
-                                          Optional<lldb::core_id_t> cpu,
+                                          Optional<lldb::cpu_id_t> cpu,
                                           Optional<long> group_fd,
                                           unsigned long flags) {
   errno = 0;
@@ -89,7 +89,7 @@ llvm::Expected<PerfEvent> PerfEvent::Init(perf_event_attr &attr,
 
 llvm::Expected<PerfEvent> PerfEvent::Init(perf_event_attr &attr,
                                           Optional<lldb::pid_t> pid,
-                                          Optional<lldb::core_id_t> cpu) {
+                                          Optional<lldb::cpu_id_t> cpu) {
   return Init(attr, pid, cpu, -1, 0);
 }
 
@@ -178,8 +178,7 @@ ArrayRef<uint8_t> PerfEvent::GetAuxBuffer() const {
            static_cast<size_t>(mmap_metadata.aux_size)};
 }
 
-Expected<std::vector<uint8_t>>
-PerfEvent::ReadFlushedOutDataCyclicBuffer(size_t offset, size_t size) {
+Expected<std::vector<uint8_t>> PerfEvent::GetReadOnlyDataBuffer() {
   // The following code assumes that the protection level of the DATA page
   // is PROT_READ. If PROT_WRITE is used, then reading would require that
   // this piece of code updates some pointers. See more about data_tail
@@ -191,8 +190,8 @@ PerfEvent::ReadFlushedOutDataCyclicBuffer(size_t offset, size_t size) {
 
   /**
    * The data buffer and aux buffer have different implementations
-   * with respect to their definition of head pointer. In the case
-   * of Aux data buffer the head always wraps around the aux buffer
+   * with respect to their definition of head pointer when using PROD_READ only.
+   * In the case of Aux data buffer the head always wraps around the aux buffer
    * and we don't need to care about it, whereas the data_head keeps
    * increasing and needs to be wrapped by modulus operator
    */
@@ -202,26 +201,17 @@ PerfEvent::ReadFlushedOutDataCyclicBuffer(size_t offset, size_t size) {
   uint64_t data_head = mmap_metadata.data_head;
   uint64_t data_size = mmap_metadata.data_size;
   std::vector<uint8_t> output;
-  output.reserve(size);
+  output.reserve(data.size());
 
   if (data_head > data_size) {
     uint64_t actual_data_head = data_head % data_size;
-    // The buffer has wrapped
-    for (uint64_t i = actual_data_head + offset;
-         i < data_size && output.size() < size; i++)
-      output.push_back(data[i]);
-
-    // We need to find the starting position for the left part if the offset was
-    // too big
-    uint64_t left_part_start = actual_data_head + offset >= data_size
-                                   ? actual_data_head + offset - data_size
-                                   : 0;
-    for (uint64_t i = left_part_start;
-         i < actual_data_head && output.size() < size; i++)
-      output.push_back(data[i]);
+    // The buffer has wrapped, so we first the oldest chunk of data
+    output.insert(output.end(), data.begin() + actual_data_head, data.end());
+    // And we we read the most recent chunk of data
+    output.insert(output.end(), data.begin(), data.begin() + actual_data_head);
   } else {
-    for (uint64_t i = offset; i < data_head && output.size() < size; i++)
-      output.push_back(data[i]);
+    // There's been no wrapping, so we just read linearly
+    output.insert(output.end(), data.begin(), data.begin() + data_head);
   }
 
   if (was_enabled) {
@@ -229,17 +219,10 @@ PerfEvent::ReadFlushedOutDataCyclicBuffer(size_t offset, size_t size) {
       return std::move(err);
   }
 
-  if (output.size() != size)
-    return createStringError(inconvertibleErrorCode(),
-                             formatv("Requested {0} bytes of perf_event data "
-                                     "buffer but only {1} are available",
-                                     size, output.size()));
-
   return output;
 }
 
-Expected<std::vector<uint8_t>>
-PerfEvent::ReadFlushedOutAuxCyclicBuffer(size_t offset, size_t size) {
+Expected<std::vector<uint8_t>> PerfEvent::GetReadOnlyAuxBuffer() {
   // The following code assumes that the protection level of the AUX page
   // is PROT_READ. If PROT_WRITE is used, then reading would require that
   // this piece of code updates some pointers. See more about aux_tail
@@ -253,9 +236,8 @@ PerfEvent::ReadFlushedOutAuxCyclicBuffer(size_t offset, size_t size) {
 
   ArrayRef<uint8_t> data = GetAuxBuffer();
   uint64_t aux_head = mmap_metadata.aux_head;
-  uint64_t aux_size = mmap_metadata.aux_size;
   std::vector<uint8_t> output;
-  output.reserve(size);
+  output.reserve(data.size());
 
   /**
    * When configured as ring buffer, the aux buffer keeps wrapping around
@@ -269,27 +251,13 @@ PerfEvent::ReadFlushedOutAuxCyclicBuffer(size_t offset, size_t size) {
    *
    * */
 
-  for (uint64_t i = aux_head + offset; i < aux_size && output.size() < size;
-       i++)
-    output.push_back(data[i]);
-
-  // We need to find the starting position for the left part if the offset was
-  // too big
-  uint64_t left_part_start =
-      aux_head + offset >= aux_size ? aux_head + offset - aux_size : 0;
-  for (uint64_t i = left_part_start; i < aux_head && output.size() < size; i++)
-    output.push_back(data[i]);
+  output.insert(output.end(), data.begin() + aux_head, data.end());
+  output.insert(output.end(), data.begin(), data.begin() + aux_head);
 
   if (was_enabled) {
     if (Error err = EnableWithIoctl())
       return std::move(err);
   }
-
-  if (output.size() != size)
-    return createStringError(inconvertibleErrorCode(),
-                             formatv("Requested {0} bytes of perf_event aux "
-                                     "buffer but only {1} are available",
-                                     size, output.size()));
 
   return output;
 }
@@ -332,7 +300,7 @@ size_t PerfEvent::GetEffectiveDataBufferSize() const {
 
 Expected<PerfEvent>
 lldb_private::process_linux::CreateContextSwitchTracePerfEvent(
-    lldb::core_id_t core_id, const PerfEvent *parent_perf_event) {
+    lldb::cpu_id_t cpu_id, const PerfEvent *parent_perf_event) {
   Log *log = GetLog(POSIXLog::Trace);
 #ifndef PERF_ATTR_SIZE_VER5
   return createStringError(inconvertibleErrorCode(),
@@ -368,7 +336,7 @@ lldb_private::process_linux::CreateContextSwitchTracePerfEvent(
     group_fd = parent_perf_event->GetFd();
 
   if (Expected<PerfEvent> perf_event =
-          PerfEvent::Init(attr, /*pid=*/None, core_id, group_fd, /*flags=*/0)) {
+          PerfEvent::Init(attr, /*pid=*/None, cpu_id, group_fd, /*flags=*/0)) {
     if (Error mmap_err = perf_event->MmapMetadataAndBuffers(
             data_buffer_numpages, 0, /*data_buffer_write=*/false)) {
       return std::move(mmap_err);

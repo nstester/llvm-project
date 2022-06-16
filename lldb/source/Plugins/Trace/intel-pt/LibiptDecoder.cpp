@@ -97,9 +97,7 @@ private:
   ///   The status that was result of synchronizing to the most recent PSB.
   ///
   /// \param[in] stop_on_psb_change
-  ///   If \b true, decoding
-  ///   An optional offset to a given PSB. Decoding stops if a different PSB is
-  ///   reached.
+  ///   If \b true, decoding stops if a different PSB is reached.
   void DecodeInstructionsAndEvents(int status,
                                    bool stop_on_psb_change = false) {
     uint64_t psb_offset;
@@ -310,7 +308,7 @@ static Error SetupMemoryImage(PtInsnDecoderUP &decoder_up, Process &process) {
   return Error::success();
 }
 
-void lldb_private::trace_intel_pt::DecodeTrace(DecodedThread &decoded_thread,
+void lldb_private::trace_intel_pt::DecodeSingleTraceForThread(DecodedThread &decoded_thread,
                                                TraceIntelPT &trace_intel_pt,
                                                ArrayRef<uint8_t> buffer) {
   Expected<PtInsnDecoderUP> decoder_up =
@@ -326,14 +324,14 @@ void lldb_private::trace_intel_pt::DecodeTrace(DecodedThread &decoded_thread,
   libipt_decoder.DecodeUntilEndOfTrace();
 }
 
-void lldb_private::trace_intel_pt::DecodeTrace(
+void lldb_private::trace_intel_pt::DecodeSystemWideTraceForThread(
     DecodedThread &decoded_thread, TraceIntelPT &trace_intel_pt,
-    const DenseMap<lldb::core_id_t, llvm::ArrayRef<uint8_t>> &buffers,
+    const DenseMap<lldb::cpu_id_t, llvm::ArrayRef<uint8_t>> &buffers,
     const std::vector<IntelPTThreadContinousExecution> &executions) {
-  DenseMap<lldb::core_id_t, LibiptDecoder> decoders;
-  for (auto &core_id_buffer : buffers) {
+  DenseMap<lldb::cpu_id_t, LibiptDecoder> decoders;
+  for (auto &cpu_id_buffer : buffers) {
     Expected<PtInsnDecoderUP> decoder_up =
-        CreateInstructionDecoder(trace_intel_pt, core_id_buffer.second);
+        CreateInstructionDecoder(trace_intel_pt, cpu_id_buffer.second);
     if (!decoder_up)
       return decoded_thread.SetAsFailed(decoder_up.takeError());
 
@@ -341,7 +339,7 @@ void lldb_private::trace_intel_pt::DecodeTrace(
                                      *decoded_thread.GetThread()->GetProcess()))
       return decoded_thread.SetAsFailed(std::move(err));
 
-    decoders.try_emplace(core_id_buffer.first,
+    decoders.try_emplace(cpu_id_buffer.first,
                          LibiptDecoder(*decoder_up->release(), decoded_thread));
   }
 
@@ -356,9 +354,9 @@ void lldb_private::trace_intel_pt::DecodeTrace(
         decoded_thread.AppendError(createStringError(
             inconvertibleErrorCode(),
             formatv("Unable to find intel pt data for thread execution with "
-                    "tsc = {0} on core id = {1}",
+                    "tsc = {0} on cpu id = {1}",
                     execution.thread_execution.GetLowestKnownTSC(),
-                    execution.thread_execution.core_id)));
+                    execution.thread_execution.cpu_id)));
       }
 
       // If the first execution is incomplete because it doesn't have a previous
@@ -367,15 +365,15 @@ void lldb_private::trace_intel_pt::DecodeTrace(
           variant == ThreadContinuousExecution::Variant::HintedStart) {
         decoded_thread.AppendError(createStringError(
             inconvertibleErrorCode(),
-            formatv("Thread execution starting at tsc = {0} on core id = {1} "
+            formatv("Thread execution starting at tsc = {0} on cpu id = {1} "
                     "doesn't have a matching context switch in.",
                     execution.thread_execution.GetLowestKnownTSC(),
-                    execution.thread_execution.core_id)));
+                    execution.thread_execution.cpu_id)));
       }
     }
 
     LibiptDecoder &decoder =
-        decoders.find(execution.thread_execution.core_id)->second;
+        decoders.find(execution.thread_execution.cpu_id)->second;
     for (const IntelPTThreadSubtrace &intel_pt_execution :
          execution.intelpt_subtraces) {
       has_seen_psbs = true;
@@ -391,10 +389,10 @@ void lldb_private::trace_intel_pt::DecodeTrace(
           variant == ThreadContinuousExecution::Variant::HintedEnd) {
         decoded_thread.AppendError(createStringError(
             inconvertibleErrorCode(),
-            formatv("Thread execution starting at tsc = {0} on core id = {1} "
+            formatv("Thread execution starting at tsc = {0} on cpu id = {1} "
                     "doesn't have a matching context switch out",
                     execution.thread_execution.GetLowestKnownTSC(),
-                    execution.thread_execution.core_id)));
+                    execution.thread_execution.cpu_id)));
       }
     }
   }
@@ -438,8 +436,8 @@ lldb_private::trace_intel_pt::SplitTraceInContinuousExecutions(
                             &psb_offset); // this can't fail because we got here
 
     executions.push_back({
-        tsc,
         psb_offset,
+        tsc,
     });
   }
   return executions;

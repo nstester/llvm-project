@@ -23,7 +23,7 @@
         {
           "file": "modules/m.out",
           "systemPath": "/tmp/m.out",
-          "loadAddress": 4194304,
+          "loadAddress": "4194304",
           "uuid": "AEFB0D59-233F-80FF-6D3C-4DED498534CF-11017B3B"
         }
       ],
@@ -44,7 +44,7 @@
   "tscPerfZeroConversion": {
     "timeMult": 1076264588,
     "timeShift": 31,
-    "timeZero": 18433473881008870804
+    "timeZero": "18433473881008870804"
   },
   "type": "intel-pt"
 }
