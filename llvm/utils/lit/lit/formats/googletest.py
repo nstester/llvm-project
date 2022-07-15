@@ -226,7 +226,11 @@ class GoogleTest(TestFormat):
         discovered_tests = remove_gtest(discovered_tests)
         gtests = [t for t in selected_tests if t.gtest_json_file]
         selected_tests = remove_gtest(selected_tests)
+        has_failure = False
         for test in gtests:
+            if test.isFailure():
+                has_failure = True
+
             # In case gtest has bugs such that no JSON file was emitted.
             if not os.path.exists(test.gtest_json_file):
                 selected_tests.append(test)
@@ -278,4 +282,4 @@ class GoogleTest(TestFormat):
                         discovered_tests.append(subtest)
             os.remove(test.gtest_json_file)
 
-        return selected_tests, discovered_tests
+        return selected_tests, discovered_tests, has_failure
