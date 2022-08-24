@@ -396,20 +396,11 @@ bool BinaryFunction::isForwardCall(const MCSymbol *CalleeSymbol) const {
 }
 
 void BinaryFunction::dump(bool PrintInstructions) const {
-  // getDynoStats calls FunctionLayout::updateLayoutIndices and
-  // BasicBlock::analyzeBranch. The former cannot be const, but should be
-  // removed, the latter should be made const, but seems to require refactoring.
-  // Forcing all callers to have a non-const reference to BinaryFunction to call
-  // dump non-const however is not ideal either. Adding this const_cast is right
-  // now the best solution. It is safe, because BinaryFunction itself is not
-  // modified. Only BinaryBasicBlocks are actually modified (if it all) and we
-  // have mutable pointers to those regardless whether this function is
-  // const-qualified or not.
-  const_cast<BinaryFunction &>(*this).print(dbgs(), "", PrintInstructions);
+  print(dbgs(), "", PrintInstructions);
 }
 
 void BinaryFunction::print(raw_ostream &OS, std::string Annotation,
-                           bool PrintInstructions) {
+                           bool PrintInstructions) const {
   if (!opts::shouldPrint(*this))
     return;
 
@@ -425,19 +416,19 @@ void BinaryFunction::print(raw_ostream &OS, std::string Annotation,
       Sep = "\n                ";
     }
   }
-  OS << "\n  Number      : " << FunctionNumber;
-  OS << "\n  State       : " << CurrentState;
-  OS << "\n  Address     : 0x" << Twine::utohexstr(Address);
-  OS << "\n  Size        : 0x" << Twine::utohexstr(Size);
-  OS << "\n  MaxSize     : 0x" << Twine::utohexstr(MaxSize);
-  OS << "\n  Offset      : 0x" << Twine::utohexstr(getFileOffset());
-  OS << "\n  Section     : " << SectionName;
-  OS << "\n  Orc Section : " << getCodeSectionName();
-  OS << "\n  LSDA        : 0x" << Twine::utohexstr(getLSDAAddress());
-  OS << "\n  IsSimple    : " << IsSimple;
-  OS << "\n  IsMultiEntry: " << isMultiEntry();
-  OS << "\n  IsSplit     : " << isSplit();
-  OS << "\n  BB Count    : " << size();
+  OS << "\n  Number      : "   << FunctionNumber
+     << "\n  State       : "   << CurrentState
+     << "\n  Address     : 0x" << Twine::utohexstr(Address)
+     << "\n  Size        : 0x" << Twine::utohexstr(Size)
+     << "\n  MaxSize     : 0x" << Twine::utohexstr(MaxSize)
+     << "\n  Offset      : 0x" << Twine::utohexstr(FileOffset)
+     << "\n  Section     : "   << SectionName
+     << "\n  Orc Section : "   << getCodeSectionName()
+     << "\n  LSDA        : 0x" << Twine::utohexstr(getLSDAAddress())
+     << "\n  IsSimple    : "   << IsSimple
+     << "\n  IsMultiEntry: "   << isMultiEntry()
+     << "\n  IsSplit     : "   << isSplit()
+     << "\n  BB Count    : "   << size();
 
   if (HasFixedIndirectBranch)
     OS << "\n  HasFixedIndirectBranch : true";
@@ -473,8 +464,8 @@ void BinaryFunction::print(raw_ostream &OS, std::string Annotation,
     for (const BinaryBasicBlock *BB : Layout.blocks())
       OS << LS << BB->getName();
   }
-  if (getImageAddress())
-    OS << "\n  Image       : 0x" << Twine::utohexstr(getImageAddress());
+  if (ImageAddress)
+    OS << "\n  Image       : 0x" << Twine::utohexstr(ImageAddress);
   if (ExecutionCount != COUNT_NO_PROFILE) {
     OS << "\n  Exec Count  : " << ExecutionCount;
     OS << "\n  Profile Acc : " << format("%.1f%%", ProfileMatchRatio * 100.0f);
@@ -513,7 +504,7 @@ void BinaryFunction::print(raw_ostream &OS, std::string Annotation,
   }
 
   StringRef SplitPointMsg = "";
-  for (const FunctionFragment &FF : Layout.fragments()) {
+  for (const FunctionFragment FF : Layout.fragments()) {
     OS << SplitPointMsg;
     SplitPointMsg = "-------   HOT-COLD SPLIT POINT   -------\n\n";
     for (const BinaryBasicBlock *BB : FF) {
@@ -2793,7 +2784,7 @@ bool BinaryFunction::finalizeCFIState() {
 
   const char *Sep = "";
   (void)Sep;
-  for (FunctionFragment &FF : Layout.fragments()) {
+  for (const FunctionFragment FF : Layout.fragments()) {
     // Hot-cold border: at start of each region (with a different FDE) we need
     // to reset the CFI state.
     int32_t State = 0;
@@ -3567,9 +3558,9 @@ size_t BinaryFunction::computeHash(bool UseDFS,
 
   assert(hasCFG() && "function is expected to have CFG");
 
-  SmallVector<const BinaryBasicBlock *, 0> Order;
+  BasicBlockListType Order;
   if (UseDFS)
-    llvm::copy(dfs(), std::back_inserter(Order));
+    Order = dfs();
   else
     llvm::copy(Layout.blocks(), std::back_inserter(Order));
 
@@ -4062,7 +4053,7 @@ void BinaryFunction::updateOutputValues(const MCAsmLayout &Layout) {
       setOutputDataAddress(BaseAddress + DataOffset);
     }
     if (isSplit()) {
-      for (FunctionFragment &FF : getLayout().getSplitFragments()) {
+      for (const FunctionFragment &FF : getLayout().getSplitFragments()) {
         ErrorOr<BinarySection &> ColdSection =
             getCodeSection(FF.getFragmentNum());
         // If fragment is empty, cold section might not exist
@@ -4084,8 +4075,8 @@ void BinaryFunction::updateOutputValues(const MCAsmLayout &Layout) {
         const uint64_t ColdStartOffset =
             Layout.getSymbolOffset(*ColdStartSymbol);
         const uint64_t ColdEndOffset = Layout.getSymbolOffset(*ColdEndSymbol);
-        FF.setAddress(ColdBaseAddress + ColdStartOffset);
-        FF.setImageSize(ColdEndOffset - ColdStartOffset);
+        cold().setAddress(ColdBaseAddress + ColdStartOffset);
+        cold().setImageSize(ColdEndOffset - ColdStartOffset);
         if (hasConstantIsland()) {
           const uint64_t DataOffset =
               Layout.getSymbolOffset(*getFunctionColdConstantIslandLabel());
@@ -4112,39 +4103,44 @@ void BinaryFunction::updateOutputValues(const MCAsmLayout &Layout) {
   if (getLayout().block_empty())
     return;
 
-  for (FunctionFragment &FF : getLayout().fragments()) {
-    if (FF.empty())
-      continue;
+  assert((getLayout().isHotColdSplit() ||
+          (cold().getAddress() == 0 && cold().getImageSize() == 0 &&
+           BC.HasRelocations)) &&
+         "Function must be split two ways or cold fragment must have no "
+         "address (only in relocation mode)");
 
+  BinaryBasicBlock *PrevBB = nullptr;
+  for (const FunctionFragment &FF : getLayout().fragments()) {
     const uint64_t FragmentBaseAddress =
         getCodeSection(isSimple() ? FF.getFragmentNum() : FragmentNum::main())
             ->getOutputAddress();
-
-    BinaryBasicBlock *PrevBB = nullptr;
     for (BinaryBasicBlock *const BB : FF) {
       assert(BB->getLabel()->isDefined() && "symbol should be defined");
       if (!BC.HasRelocations) {
-        if (BB->isSplit())
-          assert(FragmentBaseAddress == FF.getAddress());
-        else
+        if (BB->isSplit()) {
+          assert(FragmentBaseAddress == cold().getAddress());
+        } else {
           assert(FragmentBaseAddress == getOutputAddress());
+        }
       }
-
       const uint64_t BBOffset = Layout.getSymbolOffset(*BB->getLabel());
       const uint64_t BBAddress = FragmentBaseAddress + BBOffset;
       BB->setOutputStartAddress(BBAddress);
 
-      if (PrevBB)
-        PrevBB->setOutputEndAddress(BBAddress);
+      if (PrevBB) {
+        uint64_t PrevBBEndAddress = BBAddress;
+        if (BB->isSplit() != PrevBB->isSplit())
+          PrevBBEndAddress = getOutputAddress() + getOutputSize();
+        PrevBB->setOutputEndAddress(PrevBBEndAddress);
+      }
       PrevBB = BB;
 
       BB->updateOutputValues(Layout);
     }
-
-    PrevBB->setOutputEndAddress(PrevBB->isSplit()
-                                    ? FF.getAddress() + FF.getImageSize()
-                                    : getOutputAddress() + getOutputSize());
   }
+  PrevBB->setOutputEndAddress(PrevBB->isSplit()
+                                  ? cold().getAddress() + cold().getImageSize()
+                                  : getOutputAddress() + getOutputSize());
 }
 
 DebugAddressRangesVector BinaryFunction::getOutputAddressRanges() const {
@@ -4160,9 +4156,8 @@ DebugAddressRangesVector BinaryFunction::getOutputAddressRanges() const {
                             getOutputAddress() + getOutputSize());
   if (isSplit()) {
     assert(isEmitted() && "split function should be emitted");
-    for (const FunctionFragment &FF : getLayout().getSplitFragments())
-      OutputRanges.emplace_back(FF.getAddress(),
-                                FF.getAddress() + FF.getImageSize());
+    OutputRanges.emplace_back(cold().getAddress(),
+                              cold().getAddress() + cold().getImageSize());
   }
 
   if (isSimple())
