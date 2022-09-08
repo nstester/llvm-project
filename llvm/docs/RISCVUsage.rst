@@ -44,40 +44,61 @@ on support follow.
 
   .. table:: Ratified Extensions by Status
 
-     =============  ========================
-     Extension      Status
-     =============  ========================
-     ``A``          Supported
-     ``C``          Supported
-     ``D``          Supported
-     ``F``          Supported
-     ``M``          Supported
-     ``V``          Supported
-     ``Zba``        Supported
-     ``Zbb``        Supported
-     ``Zbc``        Supported
-     ``Zbs``        Supported
-     ``Zicbom``     Assembly Support
-     ``Zicbop``     Assembly Support
-     ``Zicboz``     Assembly Support
-     ``Zve32x``     Partially Supported
-     ``Zve32f``     Partially Supported
-     ``Zve64x``     Supported
-     ``Zve64f``     Supported
-     ``Zve64d``     Supported
-     ``Zvl32b``     Partially Supported
-     ``Zvl64b``     Supported
-     ``Zvl128b``    Supported
-     ``Zvl256b``    Supported
-     ``Zvl512b``    Supported
-     ``Zvl1024b``   Supported
-     ``Zvl2048b``   Supported
-     ``Zvl4096b``   Supported
-     ``Zvl8192b``   Supported
-     ``Zvl16384b``  Supported
-     ``Zvl32768b``  Supported
-     ``Zvl65536b``  Supported
-     =============  ========================
+     =============    ========================
+     Extension        Status
+     =============    ========================
+     ``A``            Supported
+     ``C``            Supported
+     ``D``            Supported
+     ``F``            Supported
+     ``M``            Supported
+     ``V``            Supported
+     ``Zba``          Supported
+     ``Zbb``          Supported
+     ``Zbc``          Supported
+     ``Zbkb``         Supported (See note)
+     ``Zbkc``         Supported
+     ``Zbkx``         Supported (See note)
+     ``Zbs``          Supported
+     ``Zdinx``        Assembly Support
+     ``Zfh``          Supported
+     ``Zfhmin``       Supported
+     ``Zfinx``        Assembly Support
+     ``Zhinx``        Assembly Support
+     ``Zhinxmin``     Assembly Support
+     ``Zicbom``       Assembly Support
+     ``Zicbop``       Assembly Support
+     ``Zicboz``       Assembly Support
+     ``Zihintpause``  Assembly Support
+     ``Zkn``          Supported
+     ``Zknd``         Supported (See note)
+     ``Zkne``         Supported (See note)
+     ``Zknh``         Supported (See note)
+     ``Zksed``        Supported (See note)
+     ``Zksh``         Supported (See note)
+     ``Zk``           Supported
+     ``Zkr``          Supported
+     ``Zks``          Supported
+     ``Zkt``          Supported
+     ``Zmmul``        Supported
+     ``Zve32x``       Partially Supported
+     ``Zve32f``       Partially Supported
+     ``Zve64x``       Supported
+     ``Zve64f``       Supported
+     ``Zve64d``       Supported
+     ``Zvl32b``       Partially Supported
+     ``Zvl64b``       Supported
+     ``Zvl128b``      Supported
+     ``Zvl256b``      Supported
+     ``Zvl512b``      Supported
+     ``Zvl1024b``     Supported
+     ``Zvl2048b``     Supported
+     ``Zvl4096b``     Supported
+     ``Zvl8192b``     Supported
+     ``Zvl16384b``    Supported
+     ``Zvl32768b``    Supported
+     ``Zvl65536b``    Supported
+     =============    ========================
 
 Assembly Support
   LLVM supports the associated instructions in assembly.  All assembly related tools (e.g. assembler, disassembler, llvm-objdump, etc..) are supported.  Compiler and linker will accept extension names, and linked binaries will contain appropriate ELF flags and attributes to reflect use of named extension.
@@ -112,6 +133,12 @@ The primary goal of experimental support is to assist in the process of ratifica
   LLVM implements `this draft text <https://github.com/riscv/riscv-v-spec/pull/780>`_.
 
 To use an experimental extension from `clang`, you must add `-menable-experimental-extensions` to the command line, and specify the exact version of the experimental extension you are using.  To use an experimental extension with LLVM's internal developer tools (e.g. `llc`, `llvm-objdump`, `llvm-mc`), you must prefix the extension name with `experimental-`.  Note that you don't need to specify the version with internal tools, and shouldn't include the `experimental-` prefix with `clang`.
+
+``Zbkb``, ``Zbkx``
+  Pattern matching support for these instructions is incomplete.
+
+``Zknd``, ``Zkne``, ``Zknh``, ``Zksed``, ``Zksh``
+  No pattern matching exists.  As a result, these instructions can only be used from assembler or via intrinsic calls.
 
 Specification Documents
 =======================
