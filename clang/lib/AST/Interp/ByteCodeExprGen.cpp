@@ -212,6 +212,10 @@ bool ByteCodeExprGen<Emitter>::VisitBinaryOperator(const BinaryOperator *BO) {
       return Discard(this->emitAdd(*T, BO));
     case BO_Mul:
       return Discard(this->emitMul(*T, BO));
+    case BO_Rem:
+      return Discard(this->emitRem(*T, BO));
+    case BO_Div:
+      return Discard(this->emitDiv(*T, BO));
     case BO_Assign:
       if (!this->emitStore(*T, BO))
         return false;
@@ -1022,6 +1026,11 @@ bool ByteCodeExprGen<Emitter>::VisitUnaryOperator(const UnaryOperator *E) {
           return DiscardResult ? this->emitPop(T, E) : true;
         });
   case UO_Not:    // ~x
+    if (!this->Visit(SubExpr))
+      return false;
+    if (Optional<PrimType> T = classify(E->getType()))
+      return this->emitComp(*T, E);
+    return false;
   case UO_Real:   // __real x
   case UO_Imag:   // __imag x
   case UO_Extension:
