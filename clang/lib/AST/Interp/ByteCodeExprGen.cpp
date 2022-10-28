@@ -343,6 +343,8 @@ bool ByteCodeExprGen<Emitter>::VisitMemberExpr(const MemberExpr *E) {
     const Record *R = getRecord(RD);
     const Record::Field *F = R->getField(FD);
     // Leave a pointer to the field on the stack.
+    if (F->Decl->getType()->isReferenceType())
+      return this->emitGetFieldPop(PT_Ptr, F->Offset, E);
     return this->emitGetPtrField(F->Offset, E);
   }
 
@@ -553,7 +555,7 @@ bool ByteCodeExprGen<Emitter>::dereferenceVar(
         return false;
       return DiscardResult ? true : this->emitGetPtrLocal(L.Offset, LV);
     }
-  } else if (auto Idx = getGlobalIdx(VD)) {
+  } else if (auto Idx = P.getGlobal(VD)) {
     switch (AK) {
     case DerefKind::Read:
       if (!this->emitGetGlobal(T, *Idx, LV))
@@ -809,7 +811,7 @@ bool ByteCodeExprGen<Emitter>::visitRecordInitializer(const Expr *Initializer) {
       if (!this->emitDupPtr(Initializer))
         return false;
 
-      if (Optional<PrimType> T = classify(Init->getType())) {
+      if (Optional<PrimType> T = classify(Init)) {
         if (!this->visit(Init))
           return false;
 
@@ -865,21 +867,6 @@ bool ByteCodeExprGen<Emitter>::visitInitializer(const Expr *Initializer) {
 
   // Otherwise, visit the expression like normal.
   return this->Visit(Initializer);
-}
-
-template <class Emitter>
-llvm::Optional<unsigned>
-ByteCodeExprGen<Emitter>::getGlobalIdx(const VarDecl *VD) {
-  if (VD->isConstexpr()) {
-    // Constexpr decl - it must have already been defined.
-    return P.getGlobal(VD);
-  }
-  if (!VD->hasLocalStorage()) {
-    // Not constexpr, but a global var - can have pointer taken.
-    Program::DeclScope Scope(P, VD);
-    return P.getOrCreateGlobal(VD);
-  }
-  return {};
 }
 
 template <class Emitter>
