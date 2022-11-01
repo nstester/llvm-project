@@ -47,7 +47,7 @@ static cl::opt<unsigned int> StartingGranularityLevel(
 
 static cl::opt<bool> TmpFilesAsBitcode(
     "write-tmp-files-as-bitcode",
-    cl::desc("Write temporary files as bitcode, instead of textual IR"),
+    cl::desc("Always write temporary files as bitcode instead of textual IR"),
     cl::init(false), cl::cat(LLVMReduceOptions));
 
 #ifdef LLVM_ENABLE_THREADS
@@ -60,19 +60,20 @@ static cl::opt<unsigned> NumJobs(
 unsigned NumJobs = 1;
 #endif
 
-void writeOutput(ReducerWorkItem &M, llvm::StringRef Message);
-
 void writeBitcode(ReducerWorkItem &M, raw_ostream &OutStream);
 
 void readBitcode(ReducerWorkItem &M, MemoryBufferRef Data, LLVMContext &Ctx,
                  const char *ToolName);
 
 bool isReduced(ReducerWorkItem &M, TestRunner &Test) {
+  const bool UseBitcode = Test.inputIsBitcode() || TmpFilesAsBitcode;
+
   SmallString<128> CurrentFilepath;
+
   // Write ReducerWorkItem to tmp file
   int FD;
   std::error_code EC = sys::fs::createTemporaryFile(
-      "llvm-reduce", M.isMIR() ? "mir" : (TmpFilesAsBitcode ? "bc" : "ll"), FD,
+      "llvm-reduce", M.isMIR() ? "mir" : (UseBitcode ? "bc" : "ll"), FD,
       CurrentFilepath);
   if (EC) {
     errs() << "Error making unique filename: " << EC.message() << "!\n";
@@ -369,7 +370,7 @@ void llvm::runDeltaPass(TestRunner &Test, ReductionFunc ExtractChunksFromModule,
       ReducedProgram = std::move(Result);
 
       // FIXME: Report meaningful progress info
-      writeOutput(*ReducedProgram, " **** SUCCESS | Saved new best reduction to ");
+      Test.writeOutput(" **** SUCCESS | Saved new best reduction to ");
     }
     // Delete uninteresting chunks
     erase_if(ChunksStillConsideredInteresting,
