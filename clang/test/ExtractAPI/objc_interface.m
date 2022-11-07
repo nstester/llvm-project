@@ -72,7 +72,8 @@
     {
       "kind": "conformsTo",
       "source": "c:objc(cs)Super",
-      "target": "c:objc(pl)Protocol"
+      "target": "c:objc(pl)Protocol",
+      "targetFallback": "Protocol"
     },
     {
       "kind": "memberOf",
