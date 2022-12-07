@@ -110,33 +110,9 @@ class DWARFUnitIndex {
 public:
   class Entry {
   public:
-    class SectionContribution {
-    private:
-      uint64_t Fields[2];
-
-    public:
-      static constexpr unsigned OffsetFieldIndex = 0;
-      static constexpr unsigned LengthFieldIndex = 1;
-      SectionContribution() { memset(&Fields, 0, sizeof(Fields)); }
-      SectionContribution(uint64_t Offset, uint64_t Length) {
-        Fields[OffsetFieldIndex] = Offset;
-        Fields[LengthFieldIndex] = Length;
-      }
-
-      void setField(unsigned Index, uint64_t Value) { Fields[Index] = Value; }
-      void setOffset(uint64_t Value) { Fields[OffsetFieldIndex] = Value; }
-      void setLength(uint64_t Value) { Fields[LengthFieldIndex] = Value; }
-      uint64_t getField32(unsigned Index) const {
-        return (uint32_t)Fields[Index];
-      }
-      uint64_t getOffset() const { return Fields[OffsetFieldIndex]; }
-      uint64_t getLength() const { return Fields[LengthFieldIndex]; }
-      uint32_t getOffset32() const {
-        return (uint32_t)Fields[OffsetFieldIndex];
-      }
-      uint32_t getLength32() const {
-        return (uint32_t)Fields[LengthFieldIndex];
-      }
+    struct SectionContribution {
+      uint32_t Offset;
+      uint32_t Length;
     };
 
   private:
@@ -148,14 +124,12 @@ public:
   public:
     const SectionContribution *getContribution(DWARFSectionKind Sec) const;
     const SectionContribution *getContribution() const;
-    SectionContribution &getContribution();
 
     const SectionContribution *getContributions() const {
       return Contributions.get();
     }
 
     uint64_t getSignature() const { return Signature; }
-    bool isValid() { return Index; }
   };
 
 private:
@@ -186,7 +160,7 @@ public:
 
   uint32_t getVersion() const { return Header.Version; }
 
-  const Entry *getFromOffset(uint64_t Offset) const;
+  const Entry *getFromOffset(uint32_t Offset) const;
   const Entry *getFromHash(uint64_t Offset) const;
 
   ArrayRef<DWARFSectionKind> getColumnKinds() const {
@@ -195,10 +169,6 @@ public:
 
   ArrayRef<Entry> getRows() const {
     return makeArrayRef(Rows.get(), Header.NumBuckets);
-  }
-
-  MutableArrayRef<Entry> getMutableRows() {
-    return makeMutableArrayRef(Rows.get(), Header.NumBuckets);
   }
 };
 
