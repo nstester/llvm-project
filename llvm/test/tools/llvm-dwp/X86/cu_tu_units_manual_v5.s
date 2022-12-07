@@ -1,9 +1,10 @@
-# This test checks if llvm-dwp can correctly generate the tu index section (v5).
+# This test checks if we can correctly parse manull cu and tu index for DWARF5.
 
 # RUN: llvm-mc -triple x86_64-unknown-linux %s -filetype=obj -o %t.o \
 # RUN:         -split-dwarf-file=%t.dwo -dwarf-version=5
 # RUN: llvm-dwp %t.dwo -o %t.dwp
-# RUN: llvm-dwarfdump -debug-info -debug-tu-index %t.dwp | FileCheck %s
+# RUN: llvm-dwarfdump -debug-info -debug-cu-index -debug-tu-index %t.dwp | FileCheck -check-prefix=CHECK %s
+# RUN: llvm-dwarfdump -debug-info -debug-cu-index -debug-tu-index -manaully-generate-unit-index %t.dwp | FileCheck -check-prefix=CHECK2 %s
 
 ## Note: In order to check whether the type unit index is generated
 ## there is no need to add the missing DIEs for the structure type of the type unit.
@@ -11,11 +12,30 @@
 # CHECK-DAG: .debug_info.dwo contents:
 # CHECK: 0x00000000: Type Unit: length = 0x00000017, format = DWARF32, version = 0x0005, unit_type = DW_UT_split_type, abbr_offset = 0x0000, addr_size = 0x08, name = '', type_signature = [[TUID1:.*]], type_offset = 0x0019 (next unit at 0x0000001b)
 # CHECK: 0x0000001b: Type Unit: length = 0x00000017, format = DWARF32, version = 0x0005, unit_type = DW_UT_split_type, abbr_offset = 0x0000, addr_size = 0x08, name = '', type_signature = [[TUID2:.*]], type_offset = 0x0019 (next unit at 0x00000036)
+# CHECK: 0x00000036: Compile Unit: length = 0x00000011, format = DWARF32, version = 0x0005, unit_type = DW_UT_split_compile, abbr_offset = 0x0000, addr_size = 0x08, DWO_id = [[CUID1:.*]] (next unit at 0x0000004b)
+# CHECK-DAG: .debug_cu_index contents:
+# CHECK: version = 5, units = 1, slots = 2
+# CHECK: Index Signature          INFO                                     ABBREV
+# CHECK:     1 [[CUID1]]          [0x0000000000000036, 0x000000000000004b) [0x00000000, 0x00000010)
 # CHECK-DAG: .debug_tu_index contents:
 # CHECK: version = 5, units = 2, slots = 4
 # CHECK: Index Signature          INFO                                     ABBREV
 # CHECK:     1 [[TUID1]]          [0x0000000000000000, 0x000000000000001b) [0x00000000, 0x00000010)
 # CHECK:     4 [[TUID2]]          [0x000000000000001b, 0x0000000000000036) [0x00000000, 0x00000010)
+
+# CHECK2-DAG: .debug_info.dwo contents:
+# CHECK2: 0x00000000: Type Unit: length = 0x00000017, format = DWARF32, version = 0x0005, unit_type = DW_UT_split_type, abbr_offset = 0x0000, addr_size = 0x08, name = '', type_signature = [[TUID1:.*]], type_offset = 0x0019 (next unit at 0x0000001b)
+# CHECK2: 0x0000001b: Type Unit: length = 0x00000017, format = DWARF32, version = 0x0005, unit_type = DW_UT_split_type, abbr_offset = 0x0000, addr_size = 0x08, name = '', type_signature = [[TUID2:.*]], type_offset = 0x0019 (next unit at 0x00000036)
+# CHECK2: 0x00000036: Compile Unit: length = 0x00000011, format = DWARF32, version = 0x0005, unit_type = DW_UT_split_compile, abbr_offset = 0x0000, addr_size = 0x08, DWO_id = [[CUID1:.*]] (next unit at 0x0000004b)
+# CHECK2-DAG: .debug_cu_index contents:
+# CHECK2: version = 5, units = 1, slots = 2
+# CHECK2: Index Signature           INFO                                     ABBREV
+# CHECK2:     1 [[CUID1]]           [0x0000000000000036, 0x000000000000004b) [0x00000000, 0x00000010)
+# CHECK2-DAG: .debug_tu_index contents:
+# CHECK2: version = 5, units = 2, slots = 4
+# CHECK2: Index Signature          INFO                                     ABBREV
+# CHECK2:     1 [[TUID1]]          [0x0000000000000000, 0x000000000000001b) [0x00000000, 0x00000010)
+# CHECK2:     4 [[TUID2]]          [0x000000000000001b, 0x0000000000000036) [0x00000000, 0x00000010)
 
     .section	.debug_info.dwo,"e",@progbits
     .long	.Ldebug_info_dwo_end0-.Ldebug_info_dwo_start0 # Length of Unit
@@ -50,7 +70,7 @@
     .byte	5                               # DWARF Unit Type (DW_UT_split_compile)
     .byte	8                               # Address Size (in bytes)
     .long	0                               # Offset Into Abbrev. Section
-    .quad	0
+    .quad	1152943841751211454
     .byte	1                               # Abbrev [1] DW_TAG_compile_unit
 .Ldebug_info_dwo_end2:
     .section	.debug_abbrev.dwo,"e",@progbits
