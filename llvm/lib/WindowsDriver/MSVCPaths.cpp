@@ -706,7 +706,7 @@ bool findVCToolChainViaRegistry(std::string &Path, ToolsetLayout &VSLayout) {
                               "InstallDir", VSInstallPath, nullptr)) {
     if (!VSInstallPath.empty()) {
       auto pos = VSInstallPath.find(R"(\Common7\IDE)");
-      if(pos == std::string::npos)
+      if (pos == std::string::npos)
         return false;
       SmallString<256> VCPath(StringRef(VSInstallPath.c_str(), pos));
       sys::path::append(VCPath, "VC");
