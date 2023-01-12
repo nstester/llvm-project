@@ -1356,16 +1356,14 @@ bool Attributor::isAssumedDead(const Instruction &I,
   if (ManifestAddedBlocks.contains(I.getParent()))
     return false;
 
-  if (!FnLivenessAA)
-    FnLivenessAA =
-        lookupAAFor<AAIsDead>(IRPosition::function(*I.getFunction(), CBCtx),
-                              QueryingAA, DepClassTy::NONE);
+  const Function &F = *I.getFunction();
+  if (!FnLivenessAA || FnLivenessAA->getAnchorScope() != &F)
+    FnLivenessAA = &getOrCreateAAFor<AAIsDead>(IRPosition::function(F, CBCtx),
+                                               QueryingAA, DepClassTy::NONE);
 
   // If we have a context instruction and a liveness AA we use it.
-  if (FnLivenessAA &&
-      FnLivenessAA->getIRPosition().getAnchorScope() == I.getFunction() &&
-      (CheckBBLivenessOnly ? FnLivenessAA->isAssumedDead(I.getParent())
-                           : FnLivenessAA->isAssumedDead(&I))) {
+  if (CheckBBLivenessOnly ? FnLivenessAA->isAssumedDead(I.getParent())
+                          : FnLivenessAA->isAssumedDead(&I)) {
     if (QueryingAA)
       recordDependence(*FnLivenessAA, *QueryingAA, DepClass);
     if (!FnLivenessAA->isKnownDead(&I))
@@ -1399,6 +1397,13 @@ bool Attributor::isAssumedDead(const IRPosition &IRP,
                                const AAIsDead *FnLivenessAA,
                                bool &UsedAssumedInformation,
                                bool CheckBBLivenessOnly, DepClassTy DepClass) {
+  // Don't check liveness for constants, e.g. functions, used as (floating)
+  // values since the context instruction and such is here meaningless.
+  if (IRP.getPositionKind() == IRPosition::IRP_FLOAT &&
+      isa<Constant>(IRP.getAssociatedValue())) {
+    return false;
+  }
+
   Instruction *CtxI = IRP.getCtxI();
   if (CtxI &&
       isAssumedDead(*CtxI, QueryingAA, FnLivenessAA, UsedAssumedInformation,
@@ -1436,9 +1441,11 @@ bool Attributor::isAssumedDead(const BasicBlock &BB,
                                const AbstractAttribute *QueryingAA,
                                const AAIsDead *FnLivenessAA,
                                DepClassTy DepClass) {
-  if (!FnLivenessAA)
-    FnLivenessAA = lookupAAFor<AAIsDead>(IRPosition::function(*BB.getParent()),
-                                         QueryingAA, DepClassTy::NONE);
+  const Function &F = *BB.getParent();
+  if (!FnLivenessAA || FnLivenessAA->getAnchorScope() != &F)
+    FnLivenessAA = &getOrCreateAAFor<AAIsDead>(IRPosition::function(F),
+                                               QueryingAA, DepClassTy::NONE);
+
   if (FnLivenessAA->isAssumedDead(&BB)) {
     if (QueryingAA)
       recordDependence(*FnLivenessAA, *QueryingAA, DepClass);
@@ -2404,10 +2411,20 @@ ChangeStatus Attributor::updateAA(AbstractAttribute &AA) {
                      /* CheckBBLivenessOnly */ true))
     CS = AA.update(*this);
 
-  if (!AA.isQueryAA() && DV.empty()) {
-    // If the attribute did not query any non-fix information, the state
-    // will not change and we can indicate that right away.
-    AAState.indicateOptimisticFixpoint();
+  if (!AA.isQueryAA() && DV.empty() && !AA.getState().isAtFixpoint()) {
+    // If the AA did not rely on outside information but changed, we run it
+    // again to see if it found a fixpoint. Most AAs do but we don't require
+    // them to. Hence, it might take the AA multiple iterations to get to a
+    // fixpoint even if it does not rely on outside information, which is fine.
+    ChangeStatus RerunCS = ChangeStatus::UNCHANGED;
+    if (CS == ChangeStatus::CHANGED)
+      RerunCS = AA.update(*this);
+
+    // If the attribute did not change during the run or rerun, and it still did
+    // not query any non-fix information, the state will not change and we can
+    // indicate that right at this point.
+    if (RerunCS == ChangeStatus::UNCHANGED && !AA.isQueryAA() && DV.empty())
+      AAState.indicateOptimisticFixpoint();
   }
 
   if (!AAState.isAtFixpoint())
