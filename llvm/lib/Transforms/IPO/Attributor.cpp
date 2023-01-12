@@ -1361,6 +1361,10 @@ bool Attributor::isAssumedDead(const Instruction &I,
     FnLivenessAA = &getOrCreateAAFor<AAIsDead>(IRPosition::function(F, CBCtx),
                                                QueryingAA, DepClassTy::NONE);
 
+  // Don't use recursive reasoning.
+  if (QueryingAA == FnLivenessAA)
+    return false;
+
   // If we have a context instruction and a liveness AA we use it.
   if (CheckBBLivenessOnly ? FnLivenessAA->isAssumedDead(I.getParent())
                           : FnLivenessAA->isAssumedDead(&I)) {
@@ -1377,7 +1381,8 @@ bool Attributor::isAssumedDead(const Instruction &I,
   const IRPosition IRP = IRPosition::inst(I, CBCtx);
   const AAIsDead &IsDeadAA =
       getOrCreateAAFor<AAIsDead>(IRP, QueryingAA, DepClassTy::NONE);
-  // Don't check liveness for AAIsDead.
+
+  // Don't use recursive reasoning.
   if (QueryingAA == &IsDeadAA)
     return false;
 
@@ -1422,7 +1427,8 @@ bool Attributor::isAssumedDead(const IRPosition &IRP,
         QueryingAA, DepClassTy::NONE);
   else
     IsDeadAA = &getOrCreateAAFor<AAIsDead>(IRP, QueryingAA, DepClassTy::NONE);
-  // Don't check liveness for AAIsDead.
+
+  // Don't use recursive reasoning.
   if (QueryingAA == IsDeadAA)
     return false;
 
@@ -1446,6 +1452,10 @@ bool Attributor::isAssumedDead(const BasicBlock &BB,
     FnLivenessAA = &getOrCreateAAFor<AAIsDead>(IRPosition::function(F),
                                                QueryingAA, DepClassTy::NONE);
 
+  // Don't use recursive reasoning.
+  if (QueryingAA == FnLivenessAA)
+    return false;
+
   if (FnLivenessAA->isAssumedDead(&BB)) {
     if (QueryingAA)
       recordDependence(*FnLivenessAA, *QueryingAA, DepClass);
@@ -1461,6 +1471,11 @@ bool Attributor::checkForAllUses(
     bool CheckBBLivenessOnly, DepClassTy LivenessDepClass,
     bool IgnoreDroppableUses,
     function_ref<bool(const Use &OldU, const Use &NewU)> EquivalentUseCB) {
+
+  // Check virtual uses first.
+  for (VirtualUseCallbackTy &CB : VirtualUseCallbacks.lookup(&V))
+    if (!CB(*this, &QueryingAA))
+      return false;
 
   // Check the trivial case first as it catches void values.
   if (V.use_empty())
@@ -1601,6 +1616,10 @@ bool Attributor::checkForAllCallSites(function_ref<bool(AbstractCallSite)> Pred,
         << " has no internal linkage, hence not all call sites are known\n");
     return false;
   }
+  // Check virtual uses first.
+  for (VirtualUseCallbackTy &CB : VirtualUseCallbacks.lookup(&Fn))
+    if (!CB(*this, QueryingAA))
+      return false;
 
   SmallVector<const Use *, 8> Uses(make_pointer_range(Fn.uses()));
   for (unsigned u = 0; u < Uses.size(); ++u) {
