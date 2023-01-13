@@ -14365,7 +14365,7 @@ SDValue DAGCombiner::visitFREEZE(SDNode *N) {
   }
   // NOTE: the whole op may be not guaranteed to not be undef or poison because
   // it could create undef or poison due to it's poison-generating flags.
-  // So not finding any maybe-poison flags is fine.
+  // So not finding any maybe-poison operands is fine.
 
   for (SDValue MaybePoisonOperand : MaybePoisonOperands) {
     // Don't replace every single UNDEF everywhere with frozen UNDEF, though.
@@ -14383,6 +14383,10 @@ SDValue DAGCombiner::visitFREEZE(SDNode *N) {
                              MaybePoisonOperand);
     }
   }
+
+  // The whole node may have been updated, so the value we were holding
+  // may no longer be valid. Re-fetch the operand we're `freeze`ing.
+  N0 = N->getOperand(0);
 
   // Finally, recreate the node, it's operands were updated to use
   // frozen operands, so we just need to use it's "original" operands.
