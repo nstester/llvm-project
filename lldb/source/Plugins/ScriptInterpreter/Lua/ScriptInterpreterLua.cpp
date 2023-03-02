@@ -349,7 +349,8 @@ Status ScriptInterpreterLua::SetBreakpointCommandCallbackFunction(
 }
 
 Status ScriptInterpreterLua::SetBreakpointCommandCallback(
-    BreakpointOptions &bp_options, const char *command_body_text, bool is_callback) {
+    BreakpointOptions &bp_options, const char *command_body_text,
+    bool is_callback) {
   return RegisterBreakpointCallback(bp_options, command_body_text, {});
 }
 
@@ -369,7 +370,8 @@ Status ScriptInterpreterLua::RegisterBreakpointCallback(
 }
 
 void ScriptInterpreterLua::SetWatchpointCommandCallback(
-    WatchpointOptions *wp_options, const char *command_body_text, bool is_callback) {
+    WatchpointOptions *wp_options, const char *command_body_text,
+    bool is_callback) {
   RegisterWatchpointCallback(wp_options, command_body_text, {});
 }
 
