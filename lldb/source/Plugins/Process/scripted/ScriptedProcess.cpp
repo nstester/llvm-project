@@ -187,6 +187,8 @@ Status ScriptedProcess::DoResume() {
   if (resume) {
     LLDB_LOGF(log, "ScriptedProcess::%s sending resume", __FUNCTION__);
 
+    SetPrivateState(eStateRunning);
+    SetPrivateState(eStateStopped);
     error = GetInterface().Resume();
   }
 
@@ -219,6 +221,19 @@ Status ScriptedProcess::DoAttachToProcessWithName(
 
 void ScriptedProcess::DidAttach(ArchSpec &process_arch) {
   process_arch = GetArchitecture();
+}
+
+Status ScriptedProcess::DoStop() {
+  Log *log = GetLog(LLDBLog::Process);
+
+  if (GetInterface().ShouldStop()) {
+    SetPrivateState(eStateStopped);
+    LLDB_LOGF(log, "ScriptedProcess::%s Immediate stop", __FUNCTION__);
+    return {};
+  }
+
+  LLDB_LOGF(log, "ScriptedProcess::%s Delayed stop", __FUNCTION__);
+  return GetInterface().Stop();
 }
 
 Status ScriptedProcess::DoDestroy() { return Status(); }
@@ -265,20 +280,6 @@ size_t ScriptedProcess::DoWriteMemory(lldb::addr_t vm_addr, const void *buf,
   // `bytes_written` is different from `size`.
 
   return bytes_written;
-}
-
-Status ScriptedProcess::EnableBreakpointSite(BreakpointSite *bp_site) {
-  assert(bp_site != nullptr);
-
-  if (bp_site->IsEnabled()) {
-    return {};
-  }
-
-  if (bp_site->HardwareRequired()) {
-    return Status("Scripted Processes don't support hardware breakpoints");
-  }
-
-  return EnableSoftwareBreakpoint(bp_site);
 }
 
 ArchSpec ScriptedProcess::GetArchitecture() {

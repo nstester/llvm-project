@@ -72,8 +72,6 @@ public:
   size_t DoWriteMemory(lldb::addr_t vm_addr, const void *buf, size_t size,
                        Status &error) override;
 
-  Status EnableBreakpointSite(BreakpointSite *bp_site) override;
-
   ArchSpec GetArchitecture();
 
   Status
@@ -90,13 +88,11 @@ public:
 
   void *GetImplementation() override;
 
-  void ForceScriptedState(lldb::StateType state) override {
-    SetPrivateState(state);
-  }
-
 protected:
   ScriptedProcess(lldb::TargetSP target_sp, lldb::ListenerSP listener_sp,
                   const ScriptedMetadata &scripted_metadata, Status &error);
+
+  Status DoStop();
 
   void Clear();
 
