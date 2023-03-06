@@ -9,9 +9,9 @@
 #ifndef LLDB_SOURCE_PLUGINS_SCRIPTED_PROCESS_H
 #define LLDB_SOURCE_PLUGINS_SCRIPTED_PROCESS_H
 
-#include "lldb/Interpreter/ScriptedMetadata.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Utility/ConstString.h"
+#include "lldb/Utility/ScriptedMetadata.h"
 #include "lldb/Utility/Status.h"
 
 #include "ScriptedThread.h"
@@ -72,6 +72,8 @@ public:
   size_t DoWriteMemory(lldb::addr_t vm_addr, const void *buf, size_t size,
                        Status &error) override;
 
+  Status EnableBreakpointSite(BreakpointSite *bp_site) override;
+
   ArchSpec GetArchitecture();
 
   Status
@@ -88,11 +90,13 @@ public:
 
   void *GetImplementation() override;
 
+  void ForceScriptedState(lldb::StateType state) override {
+    SetPrivateState(state);
+  }
+
 protected:
   ScriptedProcess(lldb::TargetSP target_sp, lldb::ListenerSP listener_sp,
                   const ScriptedMetadata &scripted_metadata, Status &error);
-
-  Status DoStop();
 
   void Clear();
 
