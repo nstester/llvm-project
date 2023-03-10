@@ -120,6 +120,13 @@ New checks
   Checks that all implicit and explicit inline functions in header files are
   tagged with the ``LIBC_INLINE`` macro.
 
+- New :doc:`cppcoreguidelines-avoid-capturing-lambda-coroutines
+  <clang-tidy/checks/cppcoreguidelines/avoid-capturing-lambda-coroutines>` check.
+
+  Flags C++20 coroutine lambdas with non-empty capture lists that may cause
+  use-after-free errors and suggests avoiding captures or ensuring the lambda
+  closure object has a guaranteed lifetime.
+
 New check aliases
 ^^^^^^^^^^^^^^^^^
 
