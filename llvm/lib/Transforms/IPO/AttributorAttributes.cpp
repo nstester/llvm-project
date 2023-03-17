@@ -10232,6 +10232,9 @@ struct AANoFPClassImpl : AANoFPClass {
       KnownFPClass KnownFPClass = computeKnownFPClass(&V, DL);
       addKnownBits(~KnownFPClass.KnownFPClasses);
     }
+
+    if (Instruction *CtxI = getCtxI())
+      followUsesInMBEC(*this, A, getState(), *CtxI);
   }
 
   /// See followUsesInMBEC
@@ -10281,6 +10284,9 @@ struct AANoFPClassFloating : public AANoFPClassImpl {
   /// See AbstractAttribute::initialize(...).
   void initialize(Attributor &A) override {
     AANoFPClassImpl::initialize(A);
+    if (!getState().isAtFixpoint())
+      if (Instruction *CtxI = getCtxI())
+        followUsesInMBEC(*this, A, getState(), *CtxI);
   }
 
   /// See AbstractAttribute::updateImpl(...).
