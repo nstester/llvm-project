@@ -1,4 +1,4 @@
-//===-- Unittests for strrchr ---------------------------------------------===//
+//===-- Implementation header for index -------------------------*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -6,9 +6,13 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "StrchrTest.h"
+#ifndef LLVM_LIBC_SRC_STRING_INDEX_H
+#define LLVM_LIBC_SRC_STRING_INDEX_H
 
-#include "src/string/strrchr.h"
-#include "test/UnitTest/Test.h"
+namespace __llvm_libc {
 
-STRRCHR_TEST(Strrchr, __llvm_libc::strrchr)
+char *index(const char *src, int c);
+
+} // namespace __llvm_libc
+
+#endif // LLVM_LIBC_SRC_STRING_INDEX_H
