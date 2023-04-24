@@ -4525,11 +4525,17 @@ void computeKnownFPClass(const Value *V, const APInt &DemandedElts,
     if (const IntrinsicInst *II = dyn_cast<IntrinsicInst>(Op)) {
       const Intrinsic::ID IID = II->getIntrinsicID();
       switch (IID) {
-      case Intrinsic::fabs:
-        computeKnownFPClass(II->getArgOperand(0), DemandedElts,
-                            InterestedClasses, Known, Depth + 1, Q, TLI);
+      case Intrinsic::fabs: {
+        if ((InterestedClasses & (fcNan | fcPositive)) != fcNone) {
+          // If we only care about the sign bit we don't need to inspect the
+          // operand.
+          computeKnownFPClass(II->getArgOperand(0), DemandedElts,
+                              InterestedClasses, Known, Depth + 1, Q, TLI);
+        }
+
         Known.fabs();
         break;
+      }
       case Intrinsic::copysign: {
         KnownFPClass KnownSign;
 
@@ -4588,6 +4594,22 @@ void computeKnownFPClass(const Value *V, const APInt &DemandedElts,
         // Non-constrained intrinsics do not guarantee signaling nan quieting.
         if (KnownSrc.isKnownNeverNaN())
           Known.knownNot(fcNan);
+        break;
+      }
+      case Intrinsic::exp:
+      case Intrinsic::exp2: {
+        Known.knownNot(fcNegative);
+        if ((InterestedClasses & fcNan) == fcNone)
+          break;
+
+        KnownFPClass KnownSrc;
+        computeKnownFPClass(II->getArgOperand(0), DemandedElts,
+                            InterestedClasses, KnownSrc, Depth + 1, Q, TLI);
+        if (KnownSrc.isKnownNeverNaN()) {
+          Known.knownNot(fcNan);
+          Known.SignBit = false;
+        }
+
         break;
       }
       case Intrinsic::arithmetic_fence: {
