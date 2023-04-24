@@ -300,8 +300,6 @@ static LogicalResult processBuffer(raw_ostream &os,
     return failure();
 
   // Parse the input file.
-  if (config.shouldPreloadDialectsInContext())
-    context.loadAllAvailableDialects();
   context.allowUnregisteredDialects(config.shouldAllowUnregisteredDialects());
   if (config.shouldVerifyDiagnostics())
     context.printOpOnDiagnostic(false);
@@ -362,48 +360,8 @@ LogicalResult mlir::MlirOptMain(llvm::raw_ostream &outputStream,
                                /*insertMarkerInOutput=*/true);
 }
 
-LogicalResult mlir::MlirOptMain(raw_ostream &outputStream,
-                                std::unique_ptr<MemoryBuffer> buffer,
-                                PassPipelineFn passManagerSetupFn,
-                                DialectRegistry &registry, bool splitInputFile,
-                                bool verifyDiagnostics, bool verifyPasses,
-                                bool allowUnregisteredDialects,
-                                bool preloadDialectsInContext,
-                                bool emitBytecode, bool explicitModule) {
-  return MlirOptMain(outputStream, std::move(buffer), registry,
-                     MlirOptMainConfig{}
-                         .splitInputFile(splitInputFile)
-                         .verifyDiagnostics(verifyDiagnostics)
-                         .verifyPasses(verifyPasses)
-                         .allowUnregisteredDialects(allowUnregisteredDialects)
-                         .preloadDialectsInContext(preloadDialectsInContext)
-                         .emitBytecode(emitBytecode)
-                         .useExplicitModule(explicitModule)
-                         .setPassPipelineSetupFn(passManagerSetupFn));
-}
-
-LogicalResult mlir::MlirOptMain(
-    raw_ostream &outputStream, std::unique_ptr<MemoryBuffer> buffer,
-    const PassPipelineCLParser &passPipeline, DialectRegistry &registry,
-    bool splitInputFile, bool verifyDiagnostics, bool verifyPasses,
-    bool allowUnregisteredDialects, bool preloadDialectsInContext,
-    bool emitBytecode, bool explicitModule, bool dumpPassPipeline) {
-  return MlirOptMain(outputStream, std::move(buffer), registry,
-                     MlirOptMainConfig{}
-                         .splitInputFile(splitInputFile)
-                         .verifyDiagnostics(verifyDiagnostics)
-                         .verifyPasses(verifyPasses)
-                         .allowUnregisteredDialects(allowUnregisteredDialects)
-                         .preloadDialectsInContext(preloadDialectsInContext)
-                         .emitBytecode(emitBytecode)
-                         .useExplicitModule(explicitModule)
-                         .dumpPassPipeline(dumpPassPipeline)
-                         .setPassPipelineParser(passPipeline));
-}
-
 LogicalResult mlir::MlirOptMain(int argc, char **argv, llvm::StringRef toolName,
-                                DialectRegistry &registry,
-                                bool preloadDialectsInContext) {
+                                DialectRegistry &registry) {
   static cl::opt<std::string> inputFilename(
       cl::Positional, cl::desc("<input file>"), cl::init("-"));
 
@@ -431,7 +389,6 @@ LogicalResult mlir::MlirOptMain(int argc, char **argv, llvm::StringRef toolName,
   // Parse pass names in main to ensure static initialization completed.
   cl::ParseCommandLineOptions(argc, argv, helpHeader);
   MlirOptMainConfig config = MlirOptMainConfig::createFromCLOptions();
-  config.preloadDialectsInContext(preloadDialectsInContext);
 
   // When reading from stdin and the input is a tty, it is often a user mistake
   // and the process "appears to be stuck". Print a message to let the user know
