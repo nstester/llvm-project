@@ -480,6 +480,15 @@ LogicalResult acc::DataOp::verify() {
   if (getOperands().empty() && !getDefaultAttr())
     return emitError("at least one operand or the default attribute "
                      "must appear on the data operation");
+
+  for (mlir::Value operand : getDataClauseOperands())
+    if (!mlir::isa<acc::AttachOp, acc::CopyinOp, acc::CopyoutOp, acc::CreateOp,
+                   acc::DeleteOp, acc::DetachOp, acc::DevicePtrOp,
+                   acc::GetDevicePtrOp, acc::NoCreateOp, acc::PresentOp>(
+            operand.getDefiningOp()))
+      return emitError("expect data entry/exit operation or acc.getdeviceptr "
+                       "as defining op");
+
   return success();
 }
 
@@ -572,6 +581,11 @@ LogicalResult acc::EnterDataOp::verify() {
   if (getWaitDevnum() && getWaitOperands().empty())
     return emitError("wait_devnum cannot appear without waitOperands");
 
+  for (mlir::Value operand : getDataClauseOperands())
+    if (!mlir::isa<acc::AttachOp, acc::CreateOp, acc::CopyinOp>(
+            operand.getDefiningOp()))
+      return emitError("expect data entry operation as defining op");
+
   return success();
 }
 
@@ -640,6 +654,12 @@ LogicalResult acc::UpdateOp::verify() {
 
   if (getWaitDevnum() && getWaitOperands().empty())
     return emitError("wait_devnum cannot appear without waitOperands");
+
+  for (mlir::Value operand : getDataClauseOperands())
+    if (!mlir::isa<acc::UpdateDeviceOp, acc::UpdateHostOp, acc::GetDevicePtrOp>(
+            operand.getDefiningOp()))
+      return emitError("expect data entry/exit operation or acc.getdeviceptr "
+                       "as defining op");
 
   return success();
 }
