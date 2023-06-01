@@ -3216,10 +3216,6 @@ multiclass VPseudoTernaryV_VV_AAXA<LMULInfo m, string Constraint = ""> {
                                       Constraint, /*Commutable*/1>;
 }
 
-multiclass VPseudoVSLDV_VX<LMULInfo m, string Constraint = ""> {
-  defm _VX : VPseudoTernaryWithPolicy<m.vrclass, m.vrclass, GPR, m, Constraint>;
-}
-
 multiclass VPseudoTernaryV_VX_AAXA<LMULInfo m, string Constraint = ""> {
   defm "_VX" : VPseudoTernaryWithPolicy<m.vrclass, GPR, m.vrclass, m,
                                         Constraint, /*Commutable*/1>;
@@ -3249,8 +3245,23 @@ multiclass VPseudoTernaryW_VF<LMULInfo m, FPR_Info f> {
                                               m.vrclass, m, constraint>;
 }
 
+multiclass VPseudoVSLDVWithPolicy<VReg RetClass,
+                                  RegisterClass Op1Class,
+                                  DAGOperand Op2Class,
+                                  LMULInfo MInfo,
+                                  string Constraint = ""> {
+  let VLMul = MInfo.value in {
+    def "_" # MInfo.MX : VPseudoTernaryNoMaskWithPolicy<RetClass, Op1Class, Op2Class, Constraint>;
+    def "_" # MInfo.MX # "_MASK" : VPseudoBinaryMaskPolicy<RetClass, Op1Class, Op2Class, Constraint>;
+  }
+}
+
+multiclass VPseudoVSLDV_VX<LMULInfo m, string Constraint = ""> {
+  defm _VX : VPseudoVSLDVWithPolicy<m.vrclass, m.vrclass, GPR, m, Constraint>;
+}
+
 multiclass VPseudoVSLDV_VI<Operand ImmType = simm5, LMULInfo m, string Constraint = ""> {
-  defm _VI : VPseudoTernaryWithPolicy<m.vrclass, m.vrclass, ImmType, m, Constraint>;
+  defm _VI : VPseudoVSLDVWithPolicy<m.vrclass, m.vrclass, ImmType, m, Constraint>;
 }
 
 multiclass VPseudoVMAC_VV_VX_AAXA<string Constraint = ""> {
