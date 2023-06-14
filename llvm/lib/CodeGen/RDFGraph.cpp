@@ -1119,7 +1119,7 @@ void DataFlowGraph::reset() {
 Ref DataFlowGraph::getNextRelated(Instr IA, Ref RA) const {
   assert(IA.Id != 0 && RA.Id != 0);
 
-  auto Related = [this, RA](Ref TA) -> bool {
+  auto IsRelated = [this, RA](Ref TA) -> bool {
     if (TA.Addr->getKind() != RA.Addr->getKind())
       return false;
     if (!getPRI().equal_to(TA.Addr->getRegRef(*this),
@@ -1128,24 +1128,26 @@ Ref DataFlowGraph::getNextRelated(Instr IA, Ref RA) const {
     }
     return true;
   };
-  auto RelatedStmt = [&Related, RA](Ref TA) -> bool {
-    return Related(TA) && &RA.Addr->getOp() == &TA.Addr->getOp();
-  };
-  auto RelatedPhi = [&Related, RA](Ref TA) -> bool {
-    if (!Related(TA))
+
+  RegisterRef RR = RA.Addr->getRegRef(*this);
+  if (IA.Addr->getKind() == NodeAttrs::Stmt) {
+    auto Cond = [&IsRelated, RA](Ref TA) -> bool {
+      return IsRelated(TA) && &RA.Addr->getOp() == &TA.Addr->getOp();
+    };
+    return RA.Addr->getNextRef(RR, Cond, true, *this);
+  }
+
+  assert(IA.Addr->getKind() == NodeAttrs::Phi);
+  auto Cond = [&IsRelated, RA](Ref TA) -> bool {
+    if (!IsRelated(TA))
       return false;
     if (TA.Addr->getKind() != NodeAttrs::Use)
       return true;
     // For phi uses, compare predecessor blocks.
-    const NodeAddr<const PhiUseNode *> TUA = TA;
-    const NodeAddr<const PhiUseNode *> RUA = RA;
-    return TUA.Addr->getPredecessor() == RUA.Addr->getPredecessor();
+    return PhiUse(TA).Addr->getPredecessor() ==
+           PhiUse(RA).Addr->getPredecessor();
   };
-
-  RegisterRef RR = RA.Addr->getRegRef(*this);
-  if (IA.Addr->getKind() == NodeAttrs::Stmt)
-    return RA.Addr->getNextRef(RR, RelatedStmt, true, *this);
-  return RA.Addr->getNextRef(RR, RelatedPhi, true, *this);
+  return RA.Addr->getNextRef(RR, Cond, true, *this);
 }
 
 // Find the next node related to RA in IA that satisfies condition P.
@@ -1192,17 +1194,6 @@ Ref DataFlowGraph::getNextShadow(Instr IA, Ref RA, bool Create) {
   NA.Addr->setFlags(Flags | NodeAttrs::Shadow);
   IA.Addr->addMemberAfter(Loc.first, NA, *this);
   return NA;
-}
-
-// Get the next shadow node in IA corresponding to RA. Return null-address
-// if such a node does not exist.
-Ref DataFlowGraph::getNextShadow(Instr IA, Ref RA) const {
-  assert(IA.Id != 0 && RA.Id != 0);
-  uint16_t Flags = RA.Addr->getFlags() | NodeAttrs::Shadow;
-  auto IsShadow = [Flags](Ref TA) -> bool {
-    return TA.Addr->getFlags() == Flags;
-  };
-  return locateNextRef(IA, RA, IsShadow).second;
 }
 
 // Create a new statement node in the block node BA that corresponds to
@@ -1582,8 +1573,7 @@ void DataFlowGraph::linkBlockRefs(DefStackMap &DefM, Block BA) {
     if (NA.Addr->getKind() != NodeAttrs::Use)
       return false;
     assert(NA.Addr->getFlags() & NodeAttrs::PhiRef);
-    PhiUse PUA = NA;
-    return PUA.Addr->getPredecessor() == BA.Id;
+    return PhiUse(NA).Addr->getPredecessor() == BA.Id;
   };
 
   RegisterAggr EHLiveIns = getLandingPadLiveIns();
