@@ -1866,11 +1866,11 @@ multiclass RVVIndexedSegLoadTuple<string op> {
 }
 
 multiclass RVVIndexedSegStoreTuple<string op> {
-  foreach type = ["i"] in {
-    foreach eew_info = [["32", "(Log2EEW:5)"]] in {
+  foreach type = TypeList in {
+    foreach eew_info = EEWList in {
       defvar eew = eew_info[0];
       defvar eew_type = eew_info[1];
-      foreach nf = [2] in {
+      foreach nf = NFList in {
         let Name = op # nf # "ei" # eew # "_v_tuple",
             OverloadedName = op # nf # "ei" # eew # "_tuple",
             IRName = op # nf,
@@ -1907,7 +1907,10 @@ multiclass RVVIndexedSegStoreTuple<string op> {
     }
             }] in {
           defvar T = "(Tuple:" # nf # ")";
-          def : RVVBuiltin<"v", "0Pe" # eew_type # "Uv" # T # "v", type>;
+          def : RVVBuiltin<T # "v", "0Pe" # eew_type # "Uv" # T # "v", type>;
+          if !not(IsFloat<type>.val) then {
+            def : RVVBuiltin<T # "Uv", "0PUe" # eew_type # "Uv" # T # "Uv", type>;
+          }
         }
       }
     }
@@ -2626,11 +2629,10 @@ let HasMasked = false, HasVL = false, IRName = "" in {
       def : RVVBuiltin<"v" # dst_lmul # "v", dst_lmul # "vvKz", "csilxfd", dst_lmul # "v">;
       def : RVVBuiltin<"Uv" # dst_lmul # "Uv", dst_lmul # "UvUvKz", "csil", dst_lmul # "Uv">;
     }
-    foreach nf = [2] in {
-      let Log2LMUL = [0] in {
-        defvar T = "(Tuple:" # nf # ")";
-        def : RVVBuiltin<T # "vv", "v" # T # "vKz", "i", "v">;
-      }
+    foreach nf = NFList in {
+      defvar T = "(Tuple:" # nf # ")";
+      def : RVVBuiltin<T # "vv", "v" # T # "vKz", "csilxfd", "v">;
+      def : RVVBuiltin<T # "UvUv", "Uv" # T # "UvKz", "csil", "Uv">;
     }
   }
 
