@@ -22890,11 +22890,19 @@ static SDValue truncateVectorWithPACK(unsigned Opcode, EVT DstVT, SDValue In,
 
   // Recursively pack lower/upper subvectors, concat result and pack again.
   assert(SrcSizeInBits >= 256 && "Expected 256-bit vector or greater");
-  EVT PackedVT = EVT::getVectorVT(Ctx, PackedSVT, NumElems / 2);
-  Lo = truncateVectorWithPACK(Opcode, PackedVT, Lo, DL, DAG, Subtarget);
-  Hi = truncateVectorWithPACK(Opcode, PackedVT, Hi, DL, DAG, Subtarget);
 
-  PackedVT = EVT::getVectorVT(Ctx, PackedSVT, NumElems);
+  EVT PackedVT = EVT::getVectorVT(Ctx, PackedSVT, NumElems);
+  if (PackedVT.is128BitVector()) {
+    // Avoid CONCAT_VECTORS on sub-128bit nodes as these can fail after
+    // type legalization.
+    SDValue Res =
+        truncateVectorWithPACK(Opcode, PackedVT, In, DL, DAG, Subtarget);
+    return truncateVectorWithPACK(Opcode, DstVT, Res, DL, DAG, Subtarget);
+  }
+
+  EVT HalfPackedVT = EVT::getVectorVT(Ctx, PackedSVT, NumElems / 2);
+  Lo = truncateVectorWithPACK(Opcode, HalfPackedVT, Lo, DL, DAG, Subtarget);
+  Hi = truncateVectorWithPACK(Opcode, HalfPackedVT, Hi, DL, DAG, Subtarget);
   SDValue Res = DAG.getNode(ISD::CONCAT_VECTORS, DL, PackedVT, Lo, Hi);
   return truncateVectorWithPACK(Opcode, DstVT, Res, DL, DAG, Subtarget);
 }
@@ -22936,6 +22944,26 @@ static SDValue LowerTruncateVecPackWithSignBits(MVT DstVT, SDValue In,
   if (!((SrcSVT == MVT::i16 || SrcSVT == MVT::i32 || SrcSVT == MVT::i64) &&
         (DstSVT == MVT::i8 || DstSVT == MVT::i16 || DstSVT == MVT::i32)))
     return SDValue();
+
+  // Don't lower with PACK nodes on AVX512 targets if we'd need more than one.
+  if (Subtarget.hasAVX512() &&
+      SrcSVT.getSizeInBits() > (DstSVT.getSizeInBits() * 2))
+    return SDValue();
+
+  // If the upper half of the source is undef, then attempt to split and
+  // only truncate the lower half.
+  if (DstVT.getSizeInBits() >= 128) {
+    SmallVector<SDValue> LowerOps;
+    if (isUpperSubvectorUndef(In, LowerOps, DAG)) {
+      MVT DstHalfVT = DstVT.getHalfNumVectorElementsVT();
+      MVT SrcHalfVT = SrcVT.getHalfNumVectorElementsVT();
+      SDValue Lo = DAG.getNode(ISD::CONCAT_VECTORS, DL, SrcHalfVT, LowerOps);
+      if (SDValue Res = LowerTruncateVecPackWithSignBits(DstHalfVT, Lo, DL,
+                                                         Subtarget, DAG))
+        return widenSubVector(Res, false, Subtarget, DAG, DL,
+                              DstVT.getSizeInBits());
+    }
+  }
 
   unsigned NumSrcEltBits = SrcVT.getScalarSizeInBits();
   unsigned NumPackedSignBits = std::min<unsigned>(DstSVT.getSizeInBits(), 16);
@@ -45051,9 +45079,10 @@ static SDValue combineBitcastvxi1(SelectionDAG &DAG, EVT VT, SDValue Src,
   if (SExtVT == MVT::v16i8 || SExtVT == MVT::v32i8 || SExtVT == MVT::v64i8) {
     V = getPMOVMSKB(DL, V, DAG, Subtarget);
   } else {
-    if (SExtVT == MVT::v8i16)
-      V = DAG.getNode(X86ISD::PACKSS, DL, MVT::v16i8, V,
-                      DAG.getUNDEF(MVT::v8i16));
+    if (SExtVT == MVT::v8i16) {
+      V = widenSubVector(V, false, Subtarget, DAG, DL, 256);
+      V = DAG.getNode(ISD::TRUNCATE, DL, MVT::v16i8, V);
+    }
     V = DAG.getNode(X86ISD::MOVMSK, DL, MVT::i32, V);
   }
 
