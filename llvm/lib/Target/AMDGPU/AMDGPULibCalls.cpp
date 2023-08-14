@@ -75,8 +75,8 @@ private:
   bool sincosUseNative(CallInst *aCI, const FuncInfo &FInfo);
 
   // evaluate calls if calls' arguments are constants.
-  bool evaluateScalarMathFunc(const FuncInfo &FInfo, double& Res0,
-    double& Res1, Constant *copr0, Constant *copr1, Constant *copr2);
+  bool evaluateScalarMathFunc(const FuncInfo &FInfo, double &Res0, double &Res1,
+                              Constant *copr0, Constant *copr1);
   bool evaluateCall(CallInst *aCI, const FuncInfo &FInfo);
 
   // sqrt
@@ -585,8 +585,7 @@ bool AMDGPULibCalls::fold(CallInst *CI) {
 
     // Specialized optimizations for each function call.
     //
-    // TODO: Handle other simple intrinsic wrappers. Sqrt, ldexp, log, rounding
-    // intrinsics.
+    // TODO: Handle other simple intrinsic wrappers. Sqrt, log.
     //
     // TODO: Handle native functions
     switch (FInfo.getId()) {
@@ -618,6 +617,29 @@ bool AMDGPULibCalls::fold(CallInst *CI) {
     case AMDGPULibFunc::EI_COPYSIGN:
       return tryReplaceLibcallWithSimpleIntrinsic(CI, Intrinsic::copysign, true,
                                                   true, true);
+    case AMDGPULibFunc::EI_FLOOR:
+      return tryReplaceLibcallWithSimpleIntrinsic(CI, Intrinsic::floor, true,
+                                                  true);
+    case AMDGPULibFunc::EI_CEIL:
+      return tryReplaceLibcallWithSimpleIntrinsic(CI, Intrinsic::ceil, true,
+                                                  true);
+    case AMDGPULibFunc::EI_TRUNC:
+      return tryReplaceLibcallWithSimpleIntrinsic(CI, Intrinsic::trunc, true,
+                                                  true);
+    case AMDGPULibFunc::EI_RINT:
+      return tryReplaceLibcallWithSimpleIntrinsic(CI, Intrinsic::rint, true,
+                                                  true);
+    case AMDGPULibFunc::EI_ROUND:
+      return tryReplaceLibcallWithSimpleIntrinsic(CI, Intrinsic::round, true,
+                                                  true);
+    case AMDGPULibFunc::EI_LDEXP: {
+      if (!shouldReplaceLibcallWithIntrinsic(CI, true, true))
+        return false;
+      CI->setCalledFunction(Intrinsic::getDeclaration(
+          CI->getModule(), Intrinsic::ldexp,
+          {CI->getType(), CI->getArgOperand(1)->getType()}));
+      return true;
+    }
     case AMDGPULibFunc::EI_POW:
     case AMDGPULibFunc::EI_POWR:
     case AMDGPULibFunc::EI_POWN:
@@ -1284,17 +1306,15 @@ bool AMDGPULibCalls::fold_sincos(FPMathOperator *FPOp, IRBuilder<> &B,
   return true;
 }
 
-bool AMDGPULibCalls::evaluateScalarMathFunc(const FuncInfo &FInfo,
-                                            double& Res0, double& Res1,
-                                            Constant *copr0, Constant *copr1,
-                                            Constant *copr2) {
+bool AMDGPULibCalls::evaluateScalarMathFunc(const FuncInfo &FInfo, double &Res0,
+                                            double &Res1, Constant *copr0,
+                                            Constant *copr1) {
   // By default, opr0/opr1/opr3 holds values of float/double type.
   // If they are not float/double, each function has to its
   // operand separately.
-  double opr0=0.0, opr1=0.0, opr2=0.0;
+  double opr0 = 0.0, opr1 = 0.0;
   ConstantFP *fpopr0 = dyn_cast_or_null<ConstantFP>(copr0);
   ConstantFP *fpopr1 = dyn_cast_or_null<ConstantFP>(copr1);
-  ConstantFP *fpopr2 = dyn_cast_or_null<ConstantFP>(copr2);
   if (fpopr0) {
     opr0 = (getArgType(FInfo) == AMDGPULibFunc::F64)
              ? fpopr0->getValueAPF().convertToDouble()
@@ -1305,12 +1325,6 @@ bool AMDGPULibCalls::evaluateScalarMathFunc(const FuncInfo &FInfo,
     opr1 = (getArgType(FInfo) == AMDGPULibFunc::F64)
              ? fpopr1->getValueAPF().convertToDouble()
              : (double)fpopr1->getValueAPF().convertToFloat();
-  }
-
-  if (fpopr2) {
-    opr2 = (getArgType(FInfo) == AMDGPULibFunc::F64)
-             ? fpopr2->getValueAPF().convertToDouble()
-             : (double)fpopr2->getValueAPF().convertToFloat();
   }
 
   switch (FInfo.getId()) {
@@ -1411,10 +1425,6 @@ bool AMDGPULibCalls::evaluateScalarMathFunc(const FuncInfo &FInfo,
     Res0 = sin(MATH_PI * opr0);
     return true;
 
-  case AMDGPULibFunc::EI_SQRT:
-    Res0 = sqrt(opr0);
-    return true;
-
   case AMDGPULibFunc::EI_TAN:
     Res0 = tan(opr0);
     return true;
@@ -1427,15 +1437,7 @@ bool AMDGPULibCalls::evaluateScalarMathFunc(const FuncInfo &FInfo,
     Res0 = tan(MATH_PI * opr0);
     return true;
 
-  case AMDGPULibFunc::EI_RECIP:
-    Res0 = 1.0 / opr0;
-    return true;
-
   // two-arg functions
-  case AMDGPULibFunc::EI_DIVIDE:
-    Res0 = opr0 / opr1;
-    return true;
-
   case AMDGPULibFunc::EI_POW:
   case AMDGPULibFunc::EI_POWR:
     Res0 = pow(opr0, opr1);
@@ -1464,12 +1466,6 @@ bool AMDGPULibCalls::evaluateScalarMathFunc(const FuncInfo &FInfo,
     Res0 = sin(opr0);
     Res1 = cos(opr0);
     return true;
-
-  // three-arg functions
-  case AMDGPULibFunc::EI_FMA:
-  case AMDGPULibFunc::EI_MAD:
-    Res0 = opr0 * opr1 + opr2;
-    return true;
   }
 
   return false;
@@ -1482,7 +1478,6 @@ bool AMDGPULibCalls::evaluateCall(CallInst *aCI, const FuncInfo &FInfo) {
 
   Constant *copr0 = nullptr;
   Constant *copr1 = nullptr;
-  Constant *copr2 = nullptr;
   if (numArgs > 0) {
     if ((copr0 = dyn_cast<Constant>(aCI->getArgOperand(0))) == nullptr)
       return false;
@@ -1495,11 +1490,6 @@ bool AMDGPULibCalls::evaluateCall(CallInst *aCI, const FuncInfo &FInfo) {
     }
   }
 
-  if (numArgs > 2) {
-    if ((copr2 = dyn_cast<Constant>(aCI->getArgOperand(2))) == nullptr)
-      return false;
-  }
-
   // At this point, all arguments to aCI are constants.
 
   // max vector size is 16, and sincos will generate two results.
@@ -1507,20 +1497,16 @@ bool AMDGPULibCalls::evaluateCall(CallInst *aCI, const FuncInfo &FInfo) {
   int FuncVecSize = getVecSize(FInfo);
   bool hasTwoResults = (FInfo.getId() == AMDGPULibFunc::EI_SINCOS);
   if (FuncVecSize == 1) {
-    if (!evaluateScalarMathFunc(FInfo, DVal0[0],
-                                DVal1[0], copr0, copr1, copr2)) {
+    if (!evaluateScalarMathFunc(FInfo, DVal0[0], DVal1[0], copr0, copr1)) {
       return false;
     }
   } else {
     ConstantDataVector *CDV0 = dyn_cast_or_null<ConstantDataVector>(copr0);
     ConstantDataVector *CDV1 = dyn_cast_or_null<ConstantDataVector>(copr1);
-    ConstantDataVector *CDV2 = dyn_cast_or_null<ConstantDataVector>(copr2);
     for (int i = 0; i < FuncVecSize; ++i) {
       Constant *celt0 = CDV0 ? CDV0->getElementAsConstant(i) : nullptr;
       Constant *celt1 = CDV1 ? CDV1->getElementAsConstant(i) : nullptr;
-      Constant *celt2 = CDV2 ? CDV2->getElementAsConstant(i) : nullptr;
-      if (!evaluateScalarMathFunc(FInfo, DVal0[i],
-                                  DVal1[i], celt0, celt1, celt2)) {
+      if (!evaluateScalarMathFunc(FInfo, DVal0[i], DVal1[i], celt0, celt1)) {
         return false;
       }
     }
