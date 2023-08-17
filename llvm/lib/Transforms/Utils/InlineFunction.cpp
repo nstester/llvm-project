@@ -1331,31 +1331,29 @@ static void AddAliasScopeMetadata(CallBase &CB, ValueToValueMapTy &VMap,
   }
 }
 
-static bool MayContainThrowingOrExitingCall(Instruction *Begin,
-                                            Instruction *End) {
+static bool MayContainThrowingOrExitingCallAfterCB(CallBase *Begin,
+                                                   ReturnInst *End) {
 
   assert(Begin->getParent() == End->getParent() &&
          "Expected to be in same basic block!");
+  auto BeginIt = Begin->getIterator();
+  assert(BeginIt != End->getIterator() && "Non-empty BB has empty iterator");
   return !llvm::isGuaranteedToTransferExecutionToSuccessor(
-      Begin->getIterator(), End->getIterator(), InlinerAttributeWindow + 1);
+      ++BeginIt, End->getIterator(), InlinerAttributeWindow + 1);
 }
 
 static AttrBuilder IdentifyValidAttributes(CallBase &CB) {
-
-  AttrBuilder AB(CB.getContext(), CB.getAttributes().getRetAttrs());
-  if (!AB.hasAttributes())
-    return AB;
   AttrBuilder Valid(CB.getContext());
   // Only allow these white listed attributes to be propagated back to the
   // callee. This is because other attributes may only be valid on the call
   // itself, i.e. attributes such as signext and zeroext.
-  if (auto DerefBytes = AB.getDereferenceableBytes())
+  if (auto DerefBytes = CB.getRetDereferenceableBytes())
     Valid.addDereferenceableAttr(DerefBytes);
-  if (auto DerefOrNullBytes = AB.getDereferenceableOrNullBytes())
+  if (auto DerefOrNullBytes = CB.getRetDereferenceableOrNullBytes())
     Valid.addDereferenceableOrNullAttr(DerefOrNullBytes);
-  if (AB.contains(Attribute::NoAlias))
+  if (CB.hasRetAttr(Attribute::NoAlias))
     Valid.addAttribute(Attribute::NoAlias);
-  if (AB.contains(Attribute::NonNull))
+  if (CB.hasRetAttr(Attribute::NonNull))
     Valid.addAttribute(Attribute::NonNull);
   return Valid;
 }
@@ -1397,7 +1395,7 @@ static void AddReturnAttributes(CallBase &CB, ValueToValueMapTy &VMap) {
     // limit the check to both RetVal and RI are in the same basic block and
     // there are no throwing/exiting instructions between these instructions.
     if (RI->getParent() != RetVal->getParent() ||
-        MayContainThrowingOrExitingCall(RetVal, RI))
+        MayContainThrowingOrExitingCallAfterCB(RetVal, RI))
       continue;
     // Add to the existing attributes of NewRetVal, i.e. the cloned call
     // instruction.
