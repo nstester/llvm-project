@@ -45,6 +45,8 @@ What works
    * ``LIBCXX_ENABLE_LOCALIZATION``
    * ``LIBCXX_ENABLE_WIDE_CHARACTERS``
    * ``LIBCXX_ENABLE_THREADS``
+   * ``LIBCXX_ENABLE_FILESYSTEM``
+   * ``LIBCXX_ENABLE_RANDOM_DEVICE``
 
 Some of the current limitations
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
