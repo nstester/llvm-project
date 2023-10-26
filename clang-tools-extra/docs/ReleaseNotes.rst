@@ -207,6 +207,11 @@ New check aliases
 Changes in existing checks
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+- Improved :doc:`bugprone-dangling-handle
+  <clang-tidy/checks/bugprone/dangling-handle>` check to support functional
+  casting during type conversions at variable initialization, now with improved
+  compatibility for C++17 and later versions.
+
 - Improved :doc:`bugprone-lambda-function-name
   <clang-tidy/checks/bugprone/lambda-function-name>` check by adding option
   `IgnoreMacros` to ignore warnings in macros.
@@ -249,6 +254,11 @@ Changes in existing checks
 - Improved :doc:`cppcoreguidelines-pro-bounds-constant-array-index
   <clang-tidy/checks/cppcoreguidelines/pro-bounds-constant-array-index>` check
   to perform checks on derived classes of  ``std::array``.
+
+- Improved :doc:`cppcoreguidelines-pro-type-const-cast
+  <clang-tidy/checks/cppcoreguidelines/pro-type-const-cast>` check to ignore
+  casts to ``const`` or ``volatile`` type (controlled by `StrictMode` option)
+  and casts in implicitly invoked code.
 
 - Improved :doc:`cppcoreguidelines-pro-type-member-init
   <clang-tidy/checks/cppcoreguidelines/pro-type-member-init>` check to ignore
