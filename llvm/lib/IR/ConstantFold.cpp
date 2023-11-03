@@ -37,6 +37,45 @@ using namespace llvm::PatternMatch;
 //                ConstantFold*Instruction Implementations
 //===----------------------------------------------------------------------===//
 
+/// Convert the specified vector Constant node to the specified vector type.
+/// At this point, we know that the elements of the input vector constant are
+/// all simple integer or FP values.
+static Constant *BitCastConstantVector(Constant *CV, VectorType *DstTy) {
+
+  if (CV->isAllOnesValue()) return Constant::getAllOnesValue(DstTy);
+  if (CV->isNullValue()) return Constant::getNullValue(DstTy);
+
+  // Do not iterate on scalable vector. The num of elements is unknown at
+  // compile-time.
+  if (isa<ScalableVectorType>(DstTy))
+    return nullptr;
+
+  // If this cast changes element count then we can't handle it here:
+  // doing so requires endianness information.  This should be handled by
+  // Analysis/ConstantFolding.cpp
+  unsigned NumElts = cast<FixedVectorType>(DstTy)->getNumElements();
+  if (NumElts != cast<FixedVectorType>(CV->getType())->getNumElements())
+    return nullptr;
+
+  Type *DstEltTy = DstTy->getElementType();
+  // Fast path for splatted constants.
+  if (Constant *Splat = CV->getSplatValue()) {
+    return ConstantVector::getSplat(DstTy->getElementCount(),
+                                    ConstantExpr::getBitCast(Splat, DstEltTy));
+  }
+
+  SmallVector<Constant*, 16> Result;
+  Type *Ty = IntegerType::get(CV->getContext(), 32);
+  for (unsigned i = 0; i != NumElts; ++i) {
+    Constant *C =
+      ConstantExpr::getExtractElement(CV, ConstantInt::get(Ty, i));
+    C = ConstantExpr::getBitCast(C, DstEltTy);
+    Result.push_back(C);
+  }
+
+  return ConstantVector::get(Result);
+}
+
 /// This function determines which opcode to use to fold two constant cast
 /// expressions together. It uses CastInst::isEliminableCastPair to determine
 /// the opcode. Consequently its just a wrapper around that function.
@@ -75,12 +114,24 @@ static Constant *FoldBitCast(Constant *V, Type *DestTy) {
   // Handle casts from one vector constant to another.  We know that the src
   // and dest type have the same size (otherwise its an illegal cast).
   if (VectorType *DestPTy = dyn_cast<VectorType>(DestTy)) {
+    if (VectorType *SrcTy = dyn_cast<VectorType>(V->getType())) {
+      assert(DestPTy->getPrimitiveSizeInBits() ==
+                 SrcTy->getPrimitiveSizeInBits() &&
+             "Not cast between same sized vectors!");
+      SrcTy = nullptr;
+      // First, check for null.  Undef is already handled.
+      if (isa<ConstantAggregateZero>(V))
+        return Constant::getNullValue(DestTy);
+
+      // Handle ConstantVector and ConstantAggregateVector.
+      return BitCastConstantVector(V, DestPTy);
+    }
+
     // Canonicalize scalar-to-vector bitcasts into vector-to-vector bitcasts
     // This allows for other simplifications (although some of them
     // can only be handled by Analysis/ConstantFolding.cpp).
     if (isa<ConstantInt>(V) || isa<ConstantFP>(V))
       return ConstantExpr::getBitCast(ConstantVector::get(V), DestPTy);
-    return nullptr;
   }
 
   // Handle integral constant input.
@@ -233,28 +284,6 @@ Constant *llvm::ConstantFoldCastInstruction(unsigned opc, Constant *V,
       // Try hard to fold cast of cast because they are often eliminable.
       if (unsigned newOpc = foldConstantCastPair(opc, CE, DestTy))
         return foldMaybeUndesirableCast(newOpc, CE->getOperand(0), DestTy);
-    } else if (CE->getOpcode() == Instruction::GetElementPtr &&
-               // Do not fold addrspacecast (gep 0, .., 0). It might make the
-               // addrspacecast uncanonicalized.
-               opc != Instruction::AddrSpaceCast &&
-               // Do not fold bitcast (gep) with inrange index, as this loses
-               // information.
-               !cast<GEPOperator>(CE)->getInRangeIndex() &&
-               // Do not fold if the gep type is a vector, as bitcasting
-               // operand 0 of a vector gep will result in a bitcast between
-               // different sizes.
-               !CE->getType()->isVectorTy()) {
-      // If all of the indexes in the GEP are null values, there is no pointer
-      // adjustment going on.  We might as well cast the source pointer.
-      bool isAllNull = true;
-      for (unsigned i = 1, e = CE->getNumOperands(); i != e; ++i)
-        if (!CE->getOperand(i)->isNullValue()) {
-          isAllNull = false;
-          break;
-        }
-      if (isAllNull)
-        // This is casting one pointer type to another, always BitCast
-        return ConstantExpr::getPointerCast(CE->getOperand(0), DestTy);
     }
   }
 
