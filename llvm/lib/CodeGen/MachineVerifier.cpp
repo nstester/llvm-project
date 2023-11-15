@@ -1966,9 +1966,6 @@ void MachineVerifier::visitMachineInstrBefore(const MachineInstr *MI) {
     if (SrcReg.isVirtual() && DstReg.isPhysical() && SrcSize.isScalable() &&
         !DstSize.isScalable())
       break;
-    if (SrcReg.isVirtual() && DstReg.isPhysical() && SrcSize.isScalable() &&
-        !DstSize.isScalable())
-      break;
 
     if (SrcSize.isNonZero() && DstSize.isNonZero() && SrcSize != DstSize) {
       if (!DstOp.getSubReg() && !SrcOp.getSubReg()) {
@@ -2265,7 +2262,7 @@ MachineVerifier::visitMachineOperand(const MachineOperand *MO, unsigned MONum) {
           }
 
           // Make sure the register fits into its register bank if any.
-          if (RegBank && Ty.isValid() &&
+          if (RegBank && Ty.isValid() && !Ty.isScalableVector() &&
               RBI->getMaximumSize(RegBank->getID()) < Ty.getSizeInBits()) {
             report("Register bank is too small for virtual register", MO,
                    MONum);
