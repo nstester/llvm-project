@@ -76,12 +76,6 @@ Pass *createLoopStrengthReducePass();
 
 //===----------------------------------------------------------------------===//
 //
-// LoopInstSimplify - This pass simplifies instructions in a loop's body.
-//
-Pass *createLoopInstSimplifyPass();
-
-//===----------------------------------------------------------------------===//
-//
 // LoopUnroll - This pass is a simple loop unrolling pass.
 //
 Pass *createLoopUnrollPass(int OptLevel = 2, bool OnlyWhenForced = false,
@@ -152,13 +146,6 @@ FunctionPass *createTailCallEliminationPass();
 // tree.
 //
 FunctionPass *createEarlyCSEPass(bool UseMemorySSA = false);
-
-//===----------------------------------------------------------------------===//
-//
-// MergedLoadStoreMotion - This pass merges loads and stores in diamonds. Loads
-// are hoisted into the header, while stores sink into the footer.
-//
-FunctionPass *createMergedLoadStoreMotionPass(bool SplitFooterBB = false);
 
 //===----------------------------------------------------------------------===//
 //
