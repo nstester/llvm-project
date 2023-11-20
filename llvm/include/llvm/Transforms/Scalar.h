@@ -39,16 +39,6 @@ Pass *createRedundantDbgInstEliminationPass();
 //
 FunctionPass *createDeadCodeEliminationPass();
 
-
-//===----------------------------------------------------------------------===//
-//
-// GuardWidening - An optimization over the @llvm.experimental.guard intrinsic
-// that (optimistically) combines multiple guards into one to have fewer checks
-// at runtime.
-//
-FunctionPass *createGuardWideningPass();
-
-
 //===----------------------------------------------------------------------===//
 //
 // LoopGuardWidening - Analogous to the GuardWidening pass, but restricted to a
@@ -70,13 +60,6 @@ FunctionPass *createSROAPass(bool PreserveCFG = true);
 // LICM - This pass is a loop invariant code motion and memory promotion pass.
 //
 Pass *createLICMPass();
-
-//===----------------------------------------------------------------------===//
-//
-// LoopSink - This pass sinks invariants from preheader to loop body where
-// frequency is lower than loop preheader.
-//
-Pass *createLoopSinkPass();
 
 //===----------------------------------------------------------------------===//
 //
