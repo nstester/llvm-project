@@ -24,13 +24,11 @@ void llvm::initializeScalarOpts(PassRegistry &Registry) {
   initializeGVNLegacyPassPass(Registry);
   initializeEarlyCSELegacyPassPass(Registry);
   initializeEarlyCSEMemSSALegacyPassPass(Registry);
-  initializeMakeGuardsExplicitLegacyPassPass(Registry);
   initializeFlattenCFGLegacyPassPass(Registry);
   initializeInferAddressSpacesPass(Registry);
   initializeInstSimplifyLegacyPassPass(Registry);
   initializeLegacyLICMPassPass(Registry);
   initializeLoopDataPrefetchLegacyPassPass(Registry);
-  initializeLoopPredicationLegacyPassPass(Registry);
   initializeLoopRotateLegacyPassPass(Registry);
   initializeLoopStrengthReducePass(Registry);
   initializeLoopUnrollPass(Registry);
