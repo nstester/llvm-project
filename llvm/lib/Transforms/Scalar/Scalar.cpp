@@ -21,7 +21,6 @@ using namespace llvm;
 void llvm::initializeScalarOpts(PassRegistry &Registry) {
   initializeConstantHoistingLegacyPassPass(Registry);
   initializeDCELegacyPassPass(Registry);
-  initializeLoopGuardWideningLegacyPassPass(Registry);
   initializeGVNLegacyPassPass(Registry);
   initializeEarlyCSELegacyPassPass(Registry);
   initializeEarlyCSEMemSSALegacyPassPass(Registry);
@@ -47,7 +46,6 @@ void llvm::initializeScalarOpts(PassRegistry &Registry) {
   initializeSROALegacyPassPass(Registry);
   initializeCFGSimplifyPassPass(Registry);
   initializeStructurizeCFGLegacyPassPass(Registry);
-  initializeSimpleLoopUnswitchLegacyPassPass(Registry);
   initializeSinkingLegacyPassPass(Registry);
   initializeTailCallElimPass(Registry);
   initializeTLSVariableHoistLegacyPassPass(Registry);
@@ -55,5 +53,4 @@ void llvm::initializeScalarOpts(PassRegistry &Registry) {
   initializeSpeculativeExecutionLegacyPassPass(Registry);
   initializeStraightLineStrengthReduceLegacyPassPass(Registry);
   initializePlaceBackedgeSafepointsLegacyPassPass(Registry);
-  initializeLoopSimplifyCFGLegacyPassPass(Registry);
 }
