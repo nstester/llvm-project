@@ -33,6 +33,13 @@ def lasxsplati32
 def lasxsplati64
   : PatFrag<(ops node:$e0),
             (v4i64 (build_vector node:$e0, node:$e0, node:$e0, node:$e0))>;
+def lasxsplatf32
+  : PatFrag<(ops node:$e0),
+            (v8f32 (build_vector node:$e0, node:$e0, node:$e0, node:$e0,
+                                 node:$e0, node:$e0, node:$e0, node:$e0))>;
+def lasxsplatf64
+  : PatFrag<(ops node:$e0),
+            (v4f64 (build_vector node:$e0, node:$e0, node:$e0, node:$e0))>;
 
 //===----------------------------------------------------------------------===//
 // Instruction class templates
@@ -1065,6 +1072,13 @@ def PseudoXVBZ_W : VecCond<loongarch_vall_zero, v8i32, LASX256>;
 def PseudoXVBZ_D : VecCond<loongarch_vall_zero, v4i64, LASX256>;
 def PseudoXVBZ : VecCond<loongarch_vany_zero, v32i8, LASX256>;
 
+let usesCustomInserter = 1, Constraints = "$xd = $dst" in {
+def PseudoXVINSGR2VR_B
+  : Pseudo<(outs LASX256:$dst), (ins LASX256:$xd, GPR:$rj, uimm5:$imm)>;
+def PseudoXVINSGR2VR_H
+  : Pseudo<(outs LASX256:$dst), (ins LASX256:$xd, GPR:$rj, uimm4:$imm)>;
+} //  usesCustomInserter = 1, Constraints = "$xd = $dst"
+
 } // Predicates = [HasExtLASX]
 
 multiclass PatXr<SDPatternOperator OpNode, string Inst> {
@@ -1365,11 +1379,22 @@ def : Pat<(fma v8f32:$xj, v8f32:$xk, v8f32:$xa),
 def : Pat<(fma v4f64:$xj, v4f64:$xk, v4f64:$xa),
           (XVFMADD_D v4f64:$xj, v4f64:$xk, v4f64:$xa)>;
 
+// PseudoXVINSGR2VR_{B/H}
+def : Pat<(vector_insert v32i8:$xd, GRLenVT:$rj, uimm5:$imm),
+          (PseudoXVINSGR2VR_B v32i8:$xd, GRLenVT:$rj, uimm5:$imm)>;
+def : Pat<(vector_insert v16i16:$xd, GRLenVT:$rj, uimm4:$imm),
+          (PseudoXVINSGR2VR_H v16i16:$xd, GRLenVT:$rj, uimm4:$imm)>;
+
 // XVINSGR2VR_{W/D}
 def : Pat<(vector_insert v8i32:$xd, GRLenVT:$rj, uimm3:$imm),
           (XVINSGR2VR_W v8i32:$xd, GRLenVT:$rj, uimm3:$imm)>;
 def : Pat<(vector_insert v4i64:$xd, GRLenVT:$rj, uimm2:$imm),
           (XVINSGR2VR_D v4i64:$xd, GRLenVT:$rj, uimm2:$imm)>;
+
+def : Pat<(vector_insert v8f32:$vd, FPR32:$fj, uimm3:$imm),
+          (XVINSGR2VR_W $vd, (COPY_TO_REGCLASS FPR32:$fj, GPR), uimm3:$imm)>;
+def : Pat<(vector_insert v4f64:$vd, FPR64:$fj, uimm2:$imm),
+          (XVINSGR2VR_D $vd, (COPY_TO_REGCLASS FPR64:$fj, GPR), uimm2:$imm)>;
 
 // XVPICKVE2GR_W[U]
 def : Pat<(loongarch_vpick_sext_elt v8i32:$xd, uimm3:$imm, i32),
@@ -1392,6 +1417,12 @@ def : Pat<(loongarch_vreplve v8i32:$xj, GRLenVT:$rk),
           (XVREPLVE_W v8i32:$xj, GRLenVT:$rk)>;
 def : Pat<(loongarch_vreplve v4i64:$xj, GRLenVT:$rk),
           (XVREPLVE_D v4i64:$xj, GRLenVT:$rk)>;
+
+// XVREPL128VEI_{W/D}
+def : Pat<(lasxsplatf32 FPR32:$fj),
+          (XVREPL128VEI_W (SUBREG_TO_REG (i64 0), FPR32:$fj, sub_32), 0)>;
+def : Pat<(lasxsplatf64 FPR64:$fj),
+          (XVREPL128VEI_D (SUBREG_TO_REG (i64 0), FPR64:$fj, sub_64), 0)>;
 
 // Loads/Stores
 foreach vt = [v32i8, v16i16, v8i32, v4i64, v8f32, v4f64] in {
