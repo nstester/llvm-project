@@ -846,7 +846,11 @@ public:
     return getGeneration() < SEA_ISLANDS;
   }
 
-  bool hasInstPrefetch() const { return getGeneration() >= GFX10; }
+  bool hasInstPrefetch() const {
+    // GFX12 can still encode the s_set_inst_prefetch_distance instruction but
+    // it has no effect.
+    return getGeneration() == GFX10 || getGeneration() == GFX11;
+  }
 
   bool hasPrefetch() const { return GFX12Insts; }
 
@@ -1139,7 +1143,7 @@ public:
   bool hasLdsWaitVMSRC() const { return getGeneration() >= GFX12; }
 
   bool hasVALUPartialForwardingHazard() const {
-    return getGeneration() >= GFX11;
+    return getGeneration() == GFX11;
   }
 
   bool hasVALUTransUseHazard() const { return HasVALUTransUseHazard; }
