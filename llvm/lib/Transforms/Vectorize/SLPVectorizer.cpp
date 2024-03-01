@@ -193,6 +193,10 @@ static cl::opt<bool>
 // it has no negative effect on the llvm benchmarks.
 static const unsigned AliasedCheckLimit = 10;
 
+// Limit of the number of uses for potentially transformed instructions/values,
+// used in checks to avoid compile-time explode.
+static constexpr int UsesLimit = 8;
+
 // Another limit for the alias checks: The maximum distance between load/store
 // instructions where alias checks are done.
 // This limit is useful for very large basic blocks.
@@ -941,7 +945,6 @@ static bool isUsedOutsideBlock(Value *V) {
   if (!I)
     return true;
   // Limits the number of uses to save compile time.
-  constexpr int UsesLimit = 8;
   return !I->mayReadOrWriteMemory() && !I->hasNUsesOrMore(UsesLimit) &&
          all_of(I->users(), [I](User *U) {
            auto *IU = dyn_cast<Instruction>(U);
@@ -1285,8 +1288,7 @@ public:
           // Retruns true if the users of V1 and V2 won't need to be extracted.
           auto AllUsersAreInternal = [U1, U2, this](Value *V1, Value *V2) {
             // Bail out if we have too many uses to save compilation time.
-            static constexpr unsigned Limit = 8;
-            if (V1->hasNUsesOrMore(Limit) || V2->hasNUsesOrMore(Limit))
+            if (V1->hasNUsesOrMore(UsesLimit) || V2->hasNUsesOrMore(UsesLimit))
               return false;
 
             auto AllUsersVectorized = [U1, U2, this](Value *V) {
@@ -4393,24 +4395,16 @@ BoUpSLP::getReorderingData(const TreeEntry &TE, bool TopToBottom) {
           if (!areTwoInsertFromSameBuildVector(
                   IE1, IE2,
                   [](InsertElementInst *II) { return II->getOperand(0); }))
-            return false;
-          std::optional<unsigned> Idx1 = getInsertIndex(IE1);
-          std::optional<unsigned> Idx2 = getInsertIndex(IE2);
-          if (Idx1 == std::nullopt || Idx2 == std::nullopt)
-            return false;
-          return *Idx1 < *Idx2;
+            return I1 < I2;
+          return getInsertIndex(IE1) < getInsertIndex(IE2);
         }
       if (auto *EE1 = dyn_cast<ExtractElementInst>(FirstUserOfPhi1))
         if (auto *EE2 = dyn_cast<ExtractElementInst>(FirstUserOfPhi2)) {
           if (EE1->getOperand(0) != EE2->getOperand(0))
-            return false;
-          std::optional<unsigned> Idx1 = getExtractIndex(EE1);
-          std::optional<unsigned> Idx2 = getExtractIndex(EE2);
-          if (Idx1 == std::nullopt || Idx2 == std::nullopt)
-            return false;
-          return *Idx1 < *Idx2;
+            return I1 < I2;
+          return getInsertIndex(EE1) < getInsertIndex(EE2);
         }
-      return false;
+      return I1 < I2;
     };
     auto IsIdentityOrder = [](const OrdersType &Order) {
       for (unsigned Idx : seq<unsigned>(0, Order.size()))
@@ -5235,8 +5229,7 @@ BoUpSLP::collectUserStores(const BoUpSLP::TreeEntry *TE) const {
   for (unsigned Lane : seq<unsigned>(0, TE->Scalars.size())) {
     Value *V = TE->Scalars[Lane];
     // To save compilation time we don't visit if we have too many users.
-    static constexpr unsigned UsersLimit = 4;
-    if (V->hasNUsesOrMore(UsersLimit))
+    if (V->hasNUsesOrMore(UsesLimit))
       break;
 
     // Collect stores per pointer object.
