@@ -463,9 +463,6 @@ static bool interp__builtin_popcount(InterpState &S, CodePtr OpPC,
                                      const InterpFrame *Frame,
                                      const Function *Func,
                                      const CallExpr *Call) {
-
-  Func->getDecl()->dump();
-
   PrimType ArgT = *S.getContext().classify(Call->getArg(0)->getType());
   APSInt Val = peekToAPSInt(S.Stk, ArgT);
   pushInteger(S, Val.popcount(), Call->getType());
@@ -1237,7 +1234,7 @@ bool InterpretOffsetOf(InterpState &S, CodePtr OpPC, const OffsetOfExpr *E,
       const RecordType *RT = CurrentType->getAs<RecordType>();
       if (!RT)
         return false;
-      RecordDecl *RD = RT->getDecl();
+      const RecordDecl *RD = RT->getDecl();
       if (RD->isInvalidDecl())
         return false;
       const ASTRecordLayout &RL = S.getCtx().getASTRecordLayout(RD);
