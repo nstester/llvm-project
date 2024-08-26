@@ -10,8 +10,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_UTILS_TABLEGEN_COMBINERUTILS_H
-#define LLVM_UTILS_TABLEGEN_COMBINERUTILS_H
+#ifndef LLVM_UTILS_TABLEGEN_COMMON_GLOBALISEL_COMBINERUTILS_H
+#define LLVM_UTILS_TABLEGEN_COMMON_GLOBALISEL_COMBINERUTILS_H
 
 #include "llvm/ADT/StringRef.h"
 #include "llvm/TableGen/Record.h"
@@ -65,6 +65,10 @@ inline const DagInit *getDagWithOperatorOfSubClass(const Init &N,
         return I;
   return nullptr;
 }
+
+/// Copies a StringRef into a static pool to preserve it.
+StringRef insertStrRef(StringRef S);
+
 } // namespace llvm
 
-#endif
+#endif // LLVM_UTILS_TABLEGEN_COMMON_GLOBALISEL_COMBINERUTILS_H
