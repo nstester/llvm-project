@@ -84,9 +84,9 @@ void EmitClangDiagsIndexName(llvm::RecordKeeper &Records,
 
 void EmitClangSACheckers(llvm::RecordKeeper &Records, llvm::raw_ostream &OS);
 
-void EmitClangCommentHTMLTags(llvm::RecordKeeper &Records,
+void EmitClangCommentHTMLTags(const llvm::RecordKeeper &Records,
                               llvm::raw_ostream &OS);
-void EmitClangCommentHTMLTagsProperties(llvm::RecordKeeper &Records,
+void EmitClangCommentHTMLTagsProperties(const llvm::RecordKeeper &Records,
                                         llvm::raw_ostream &OS);
 void EmitClangCommentHTMLNamedCharacterReferences(
     const llvm::RecordKeeper &Records, llvm::raw_ostream &OS);
@@ -152,7 +152,7 @@ void EmitClangOpenCLBuiltinHeader(llvm::RecordKeeper &Records,
 void EmitClangOpenCLBuiltinTests(llvm::RecordKeeper &Records,
                                  llvm::raw_ostream &OS);
 
-void EmitClangDataCollectors(llvm::RecordKeeper &Records,
+void EmitClangDataCollectors(const llvm::RecordKeeper &Records,
                              llvm::raw_ostream &OS);
 
 void EmitTestPragmaAttributeSupportedAttributes(llvm::RecordKeeper &Records,
