@@ -95,7 +95,7 @@ void EmitClangCommentCommandInfo(const llvm::RecordKeeper &Records,
                                  llvm::raw_ostream &OS);
 void EmitClangCommentCommandList(const llvm::RecordKeeper &Records,
                                  llvm::raw_ostream &OS);
-void EmitClangOpcodes(llvm::RecordKeeper &Records, llvm::raw_ostream &OS);
+void EmitClangOpcodes(const llvm::RecordKeeper &Records, llvm::raw_ostream &OS);
 
 void EmitClangSyntaxNodeList(llvm::RecordKeeper &Records,
                              llvm::raw_ostream &OS);
@@ -143,13 +143,13 @@ void EmitCdeBuiltinAliases(llvm::RecordKeeper &Records, llvm::raw_ostream &OS);
 
 void EmitClangAttrDocs(llvm::RecordKeeper &Records, llvm::raw_ostream &OS);
 void EmitClangDiagDocs(llvm::RecordKeeper &Records, llvm::raw_ostream &OS);
-void EmitClangOptDocs(llvm::RecordKeeper &Records, llvm::raw_ostream &OS);
+void EmitClangOptDocs(const llvm::RecordKeeper &Records, llvm::raw_ostream &OS);
 
-void EmitClangOpenCLBuiltins(llvm::RecordKeeper &Records,
+void EmitClangOpenCLBuiltins(const llvm::RecordKeeper &Records,
                              llvm::raw_ostream &OS);
-void EmitClangOpenCLBuiltinHeader(llvm::RecordKeeper &Records,
+void EmitClangOpenCLBuiltinHeader(const llvm::RecordKeeper &Records,
                                   llvm::raw_ostream &OS);
-void EmitClangOpenCLBuiltinTests(llvm::RecordKeeper &Records,
+void EmitClangOpenCLBuiltinTests(const llvm::RecordKeeper &Records,
                                  llvm::raw_ostream &OS);
 
 void EmitClangDataCollectors(const llvm::RecordKeeper &Records,
