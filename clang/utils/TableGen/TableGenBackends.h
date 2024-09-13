@@ -94,7 +94,8 @@ void EmitClangDiagGroups(const llvm::RecordKeeper &Records,
 void EmitClangDiagsIndexName(const llvm::RecordKeeper &Records,
                              llvm::raw_ostream &OS);
 
-void EmitClangSACheckers(llvm::RecordKeeper &Records, llvm::raw_ostream &OS);
+void EmitClangSACheckers(const llvm::RecordKeeper &Records,
+                         llvm::raw_ostream &OS);
 
 void EmitClangCommentHTMLTags(const llvm::RecordKeeper &Records,
                               llvm::raw_ostream &OS);
@@ -109,9 +110,9 @@ void EmitClangCommentCommandList(const llvm::RecordKeeper &Records,
                                  llvm::raw_ostream &OS);
 void EmitClangOpcodes(const llvm::RecordKeeper &Records, llvm::raw_ostream &OS);
 
-void EmitClangSyntaxNodeList(llvm::RecordKeeper &Records,
+void EmitClangSyntaxNodeList(const llvm::RecordKeeper &Records,
                              llvm::raw_ostream &OS);
-void EmitClangSyntaxNodeClasses(llvm::RecordKeeper &Records,
+void EmitClangSyntaxNodeClasses(const llvm::RecordKeeper &Records,
                                 llvm::raw_ostream &OS);
 
 void EmitNeon(llvm::RecordKeeper &Records, llvm::raw_ostream &OS);
