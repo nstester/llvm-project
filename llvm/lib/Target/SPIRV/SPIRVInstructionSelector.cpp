@@ -754,6 +754,15 @@ bool SPIRVInstructionSelector::spvSelect(Register ResVReg,
   case TargetOpcode::G_UNMERGE_VALUES:
     return selectUnmergeValues(I);
 
+  // Discard gen opcodes for intrinsics which we do not expect to actually
+  // represent code after lowering or intrinsics which are not implemented but
+  // should not crash when found in a customer's LLVM IR input.
+  case TargetOpcode::G_TRAP:
+  case TargetOpcode::G_DEBUGTRAP:
+  case TargetOpcode::G_UBSANTRAP:
+  case TargetOpcode::DBG_LABEL:
+    return true;
+
   default:
     return false;
   }
@@ -2591,6 +2600,16 @@ bool SPIRVInstructionSelector::selectIntrinsic(Register ResVReg,
           .addUse(I.getOperand(2).getReg())
           .addUse(I.getOperand(3).getReg());
     break;
+  case Intrinsic::arithmetic_fence:
+    if (STI.canUseExtension(SPIRV::Extension::SPV_EXT_arithmetic_fence))
+      BuildMI(BB, I, I.getDebugLoc(), TII.get(SPIRV::OpArithmeticFenceEXT))
+          .addDef(ResVReg)
+          .addUse(GR.getSPIRVTypeID(ResType))
+          .addUse(I.getOperand(2).getReg());
+    else
+      BuildMI(BB, I, I.getDebugLoc(), TII.get(TargetOpcode::COPY), ResVReg)
+          .addUse(I.getOperand(2).getReg());
+    break;
   case Intrinsic::spv_thread_id:
     return selectSpvThreadId(ResVReg, ResType, I);
   case Intrinsic::spv_fdot:
@@ -2636,8 +2655,15 @@ bool SPIRVInstructionSelector::selectIntrinsic(Register ResVReg,
   }
   case Intrinsic::spv_step:
     return selectStep(ResVReg, ResType, I);
+  // Discard intrinsics which we do not expect to actually represent code after
+  // lowering or intrinsics which are not implemented but should not crash when
+  // found in a customer's LLVM IR input.
+  case Intrinsic::instrprof_increment:
+  case Intrinsic::instrprof_increment_step:
+  case Intrinsic::instrprof_value_profile:
+    break;
+  // Discard internal intrinsics.
   case Intrinsic::spv_value_md:
-    // ignore the intrinsic
     break;
   default: {
     std::string DiagMsg;
