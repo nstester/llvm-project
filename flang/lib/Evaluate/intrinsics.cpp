@@ -572,6 +572,10 @@ static const IntrinsicInterface genericIntrinsicFunction[]{
             DefaultingKIND},
         KINDInt},
     {"int", {{"a", AnyNumeric, Rank::elementalOrBOZ}, DefaultingKIND}, KINDInt},
+    {"int2", {{"a", AnyNumeric, Rank::elementalOrBOZ}},
+        TypePattern{IntType, KindCode::exactKind, 2}},
+    {"int8", {{"a", AnyNumeric, Rank::elementalOrBOZ}},
+        TypePattern{IntType, KindCode::exactKind, 8}},
     {"int_ptr_kind", {}, DefaultInt, Rank::scalar},
     {"ior", {{"i", OperandInt}, {"j", OperandInt, Rank::elementalOrBOZ}},
         OperandInt},
@@ -1176,12 +1180,6 @@ static const SpecificIntrinsicInterface specificIntrinsicFunction[]{
     // procedure pointer target.
     {{"index", {{"string", DefaultChar}, {"substring", DefaultChar}},
         DefaultInt}},
-    {{"int2", {{"a", AnyNumeric, Rank::elementalOrBOZ}},
-         TypePattern{IntType, KindCode::exactKind, 2}},
-        "int"},
-    {{"int8", {{"a", AnyNumeric, Rank::elementalOrBOZ}},
-         TypePattern{IntType, KindCode::exactKind, 8}},
-        "int"},
     {{"isign", {{"a", DefaultInt}, {"b", DefaultInt}}, DefaultInt}, "sign"},
     {{"jiabs", {{"a", TypePattern{IntType, KindCode::exactKind, 4}}},
          TypePattern{IntType, KindCode::exactKind, 4}},
@@ -2849,15 +2847,16 @@ IntrinsicProcTable::Implementation::HandleC_F_Pointer(
               "FPTR= argument to C_F_POINTER() may not have a deferred type parameter"_err_en_US);
         } else if (type->category() == TypeCategory::Derived) {
           if (context.languageFeatures().ShouldWarn(
-                  common::UsageWarning::Interoperability)) {
-            if (type->IsUnlimitedPolymorphic()) {
-              context.messages().Say(common::UsageWarning::Interoperability, at,
-                  "FPTR= argument to C_F_POINTER() should not be unlimited polymorphic"_warn_en_US);
-            } else if (!type->GetDerivedTypeSpec().typeSymbol().attrs().test(
-                           semantics::Attr::BIND_C)) {
-              context.messages().Say(common::UsageWarning::Interoperability, at,
-                  "FPTR= argument to C_F_POINTER() should not have a derived type that is not BIND(C)"_warn_en_US);
-            }
+                  common::UsageWarning::Interoperability) &&
+              type->IsUnlimitedPolymorphic()) {
+            context.messages().Say(common::UsageWarning::Interoperability, at,
+                "FPTR= argument to C_F_POINTER() should not be unlimited polymorphic"_warn_en_US);
+          } else if (!type->GetDerivedTypeSpec().typeSymbol().attrs().test(
+                         semantics::Attr::BIND_C) &&
+              context.languageFeatures().ShouldWarn(
+                  common::UsageWarning::Portability)) {
+            context.messages().Say(common::UsageWarning::Portability, at,
+                "FPTR= argument to C_F_POINTER() should not have a derived type that is not BIND(C)"_port_en_US);
           }
         } else if (!IsInteroperableIntrinsicType(
                        *type, &context.languageFeatures())
