@@ -1535,6 +1535,7 @@ class PackedIntInputModsMatchClass <int opSize> : AsmOperandClass {
 
 def PackedF16InputModsMatchClass : PackedFPInputModsMatchClass<16>;
 def PackedI16InputModsMatchClass : PackedIntInputModsMatchClass<16>;
+def PackedF32InputModsMatchClass : PackedFPInputModsMatchClass<32>;
 
 class PackedFPInputMods <PackedFPInputModsMatchClass matchClass> : InputMods <matchClass> {
   let PrintMethod = "printOperandAndFPInputMods";
@@ -1546,6 +1547,7 @@ class PackedIntInputMods <PackedIntInputModsMatchClass matchClass> : InputMods <
 
 def PackedF16InputMods : PackedFPInputMods<PackedF16InputModsMatchClass>;
 def PackedI16InputMods : PackedIntInputMods<PackedI16InputModsMatchClass>;
+def PackedF32InputMods : PackedFPInputMods<PackedF32InputModsMatchClass>;
 
 def MFMALdScaleModifierOp : TImmLeaf<i32, [{
   return isUInt<2>(Imm);
@@ -2846,6 +2848,8 @@ def VOP_V2I16_F32_F32_F32 : VOPProfile<[v2i16, f32, f32, f32]>;
 def VOP_V2I16_V2F16_F32 : VOPProfile<[v2i16, v2f16, f32, untyped]>;
 def VOP_V2I16_V2BF16_F32 : VOPProfile<[v2i16, v2bf16, f32, untyped]>;
 def VOP_I32_F32_F32_F32 : VOPProfile<[i32, f32, f32, f32]>;
+def VOP_I32_V2F16_F32_F32 : VOPProfile<[i32, v2f16, f32, f32]>;
+def VOP_I32_V2BF16_F32_F32: VOPProfile<[i32, v2bf16, f32, f32]>;
 
 def VOP_I64_I64_I32 : VOPProfile <[i64, i64, i32, untyped]>;
 def VOP_I64_I32_I64 : VOPProfile <[i64, i32, i64, untyped]>;
