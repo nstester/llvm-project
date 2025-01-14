@@ -52,6 +52,12 @@ const Scope *FindModuleContaining(const Scope &start) {
       start, [](const Scope &scope) { return scope.IsModule(); });
 }
 
+const Scope *FindModuleOrSubmoduleContaining(const Scope &start) {
+  return FindScopeContaining(start, [](const Scope &scope) {
+    return scope.IsModule() || scope.IsSubmodule();
+  });
+}
+
 const Scope *FindModuleFileContaining(const Scope &start) {
   return FindScopeContaining(
       start, [](const Scope &scope) { return scope.IsModuleFile(); });
@@ -1584,7 +1590,8 @@ const std::optional<parser::Name> &MaybeGetNodeName(
 
 std::optional<ArraySpec> ToArraySpec(
     evaluate::FoldingContext &context, const evaluate::Shape &shape) {
-  if (auto extents{evaluate::AsConstantExtents(context, shape)}) {
+  if (auto extents{evaluate::AsConstantExtents(context, shape)};
+      extents && !evaluate::HasNegativeExtent(*extents)) {
     ArraySpec result;
     for (const auto &extent : *extents) {
       result.emplace_back(ShapeSpec::MakeExplicit(Bound{extent}));
